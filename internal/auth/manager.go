@@ -122,9 +122,8 @@ func (m *Manager) initiateComposioAuth(ctx context.Context, a adapter.PlatformAd
 	composioCallback := m.baseURL + "/auth/composio-callback?state=" + state
 
 	resp, err := cap.ComposioClient().InitiateConnection(ctx, composio.InitiateConnectionRequest{
-		UserID:       userID,
-		AuthConfigID: cap.AuthConfigID(),
-		RedirectURL:  composioCallback,
+		IntegrationID: cap.IntegrationID(),
+		RedirectURI:   composioCallback,
 	})
 	if err != nil {
 		return "", fmt.Errorf("composio initiate: %w", err)

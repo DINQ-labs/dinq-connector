@@ -18,13 +18,14 @@ const (
 )
 
 // New creates a Twitter adapter backed by Composio.
-func New(client *composio.Client, authConfigID string) *adapter.ComposioAdapter {
+func New(client *composio.Client, authConfigID, integrationID string) *adapter.ComposioAdapter {
 	return adapter.NewComposioAdapter(client, adapter.ComposioAdapterConfig{
-		Platform:     "twitter",
-		DisplayName_: "Twitter / X",
-		AuthConfigID: authConfigID,
-		AppName:      "twitter",
-		Tools_:       tools(),
+		Platform:      "twitter",
+		DisplayName_:  "Twitter / X",
+		AuthConfigID:  authConfigID,
+		IntegrationID: integrationID,
+		AppName:       "twitter",
+		Tools_:        tools(),
 	})
 }
 

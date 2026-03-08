@@ -64,6 +64,7 @@ type ToolHandler func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTo
 type ComposioAuthProvider interface {
 	PlatformAdapter
 	AuthConfigID() string
+	IntegrationID() string // UUID used in API calls
 	ComposioClient() *composio.Client
 	ComposioAppName() string
 }

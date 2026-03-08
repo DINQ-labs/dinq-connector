@@ -39,9 +39,9 @@ func NewClient(apiKey string) *Client {
 
 // InitiateConnectionRequest is the input for initiating a user connection.
 type InitiateConnectionRequest struct {
-	UserID       string `json:"user_id"`
-	AuthConfigID string `json:"auth_config_id"`
-	RedirectURL  string `json:"redirect_url,omitempty"`
+	IntegrationID string         `json:"integrationId"`        // UUID from /v1/integrations
+	Data          map[string]any `json:"data"`                 // empty object required
+	RedirectURI   string         `json:"redirectUri,omitempty"`
 }
 
 // InitiateConnectionResponse is returned after starting OAuth.
@@ -53,12 +53,37 @@ type InitiateConnectionResponse struct {
 
 // InitiateConnection starts an OAuth flow for a user on a platform.
 func (c *Client) InitiateConnection(ctx context.Context, req InitiateConnectionRequest) (*InitiateConnectionResponse, error) {
+	if req.Data == nil {
+		req.Data = map[string]any{}
+	}
 	var resp InitiateConnectionResponse
 	err := c.post(ctx, "/v1/connectedAccounts", req, &resp)
 	if err != nil {
 		return nil, err
 	}
 	return &resp, nil
+}
+
+// Integration represents a Composio integration (auth config).
+type Integration struct {
+	ID      string `json:"id"`      // UUID — used as integrationId in API calls
+	AppName string `json:"appName"` // e.g. "linkedin"
+	Name    string `json:"name"`
+}
+
+// GetIntegrations returns all integrations, keyed by appName.
+func (c *Client) GetIntegrations(ctx context.Context) (map[string]Integration, error) {
+	var resp struct {
+		Items []Integration `json:"items"`
+	}
+	if err := c.get(ctx, "/v1/integrations?pageSize=100", &resp); err != nil {
+		return nil, err
+	}
+	m := make(map[string]Integration, len(resp.Items))
+	for _, i := range resp.Items {
+		m[i.AppName] = i
+	}
+	return m, nil
 }
 
 // ConnectedAccount represents a user's connection to a platform in Composio.

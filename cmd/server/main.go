@@ -46,9 +46,24 @@ func main() {
 		cc := composio.NewClient(apiKey)
 		ctx := context.Background()
 
+		// Fetch all integration UUIDs once (needed for InitiateConnection v3 API)
+		integrations, err := cc.GetIntegrations(ctx)
+		if err != nil {
+			log.Printf("[Composio] Warning: failed to fetch integrations: %v", err)
+			integrations = map[string]composio.Integration{}
+		} else {
+			log.Printf("[Composio] Loaded %d integration UUIDs", len(integrations))
+		}
+		integrationID := func(appName string) string {
+			if i, ok := integrations[appName]; ok {
+				return i.ID
+			}
+			return ""
+		}
+
 		// Twitter: static adapter (free tier — limited tools)
 		if id := os.Getenv("COMPOSIO_TWITTER_AUTH_CONFIG_ID"); id != "" {
-			registry.Register(twitter.New(cc, id))
+			registry.Register(twitter.New(cc, id, integrationID("twitter")))
 			log.Println("[Registry] Twitter registered (static, free tier)")
 		}
 
@@ -75,7 +90,7 @@ func main() {
 			if id == "" {
 				continue
 			}
-			a, err := adapter.NewDynamicComposioAdapter(ctx, cc, p.platform, p.displayName, id, p.appName)
+			a, err := adapter.NewDynamicComposioAdapter(ctx, cc, p.platform, p.displayName, id, integrationID(p.appName), p.appName)
 			if err != nil {
 				log.Printf("[Registry] Warning: %s skipped: %v", p.displayName, err)
 				continue

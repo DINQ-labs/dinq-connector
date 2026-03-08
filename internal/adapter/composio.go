@@ -22,11 +22,12 @@ type ComposioToolMapping struct {
 
 // ComposioAdapterConfig configures a Composio-backed platform adapter.
 type ComposioAdapterConfig struct {
-	Platform     string                // "twitter", "linkedin"
-	DisplayName_ string               // "Twitter", "LinkedIn"
-	AuthConfigID string                // Composio auth config ID (from dashboard)
-	AppName      string                // Composio app name, e.g. "twitter", "linkedin"
-	Tools_       []ComposioToolMapping // Tool definitions
+	Platform      string                // "twitter", "linkedin"
+	DisplayName_  string                // "Twitter", "LinkedIn"
+	AuthConfigID  string                // Composio auth config ID (from dashboard, ac_xxx)
+	IntegrationID string                // Composio integration UUID (from /v1/integrations)
+	AppName       string                // Composio app name, e.g. "twitter", "linkedin"
+	Tools_        []ComposioToolMapping // Tool definitions
 }
 
 // ComposioAdapter implements PlatformAdapter using Composio as the backend.
@@ -43,7 +44,7 @@ func NewComposioAdapter(client *composio.Client, config ComposioAdapterConfig) *
 
 // NewDynamicComposioAdapter creates an adapter by fetching tool definitions from Composio API at startup.
 // No need to hardcode action IDs — tools are discovered automatically.
-func NewDynamicComposioAdapter(ctx context.Context, client *composio.Client, platform, displayName, authConfigID, appName string) (*ComposioAdapter, error) {
+func NewDynamicComposioAdapter(ctx context.Context, client *composio.Client, platform, displayName, authConfigID, integrationID, appName string) (*ComposioAdapter, error) {
 	actions, err := client.ListActions(ctx, appName, 30)
 	if err != nil {
 		return nil, fmt.Errorf("fetch %s actions: %w", appName, err)
@@ -109,11 +110,12 @@ func NewDynamicComposioAdapter(ctx context.Context, client *composio.Client, pla
 	log.Printf("[Composio] Discovered %d actions for %s", len(tools), displayName)
 
 	return NewComposioAdapter(client, ComposioAdapterConfig{
-		Platform:     platform,
-		DisplayName_: displayName,
-		AuthConfigID: authConfigID,
-		AppName:      appName,
-		Tools_:       tools,
+		Platform:      platform,
+		DisplayName_:  displayName,
+		AuthConfigID:  authConfigID,
+		IntegrationID: integrationID,
+		AppName:       appName,
+		Tools_:        tools,
 	}), nil
 }
 
@@ -123,9 +125,10 @@ func (a *ComposioAdapter) AuthScheme() AuthScheme { return AuthComposio }
 func (a *ComposioAdapter) OAuthConfig() *OAuthConfig { return nil }
 
 // ComposioAuthProvider methods (used by auth manager)
-func (a *ComposioAdapter) AuthConfigID() string          { return a.config.AuthConfigID }
+func (a *ComposioAdapter) AuthConfigID() string             { return a.config.AuthConfigID }
+func (a *ComposioAdapter) IntegrationID() string            { return a.config.IntegrationID }
 func (a *ComposioAdapter) ComposioClient() *composio.Client { return a.client }
-func (a *ComposioAdapter) ComposioAppName() string        { return a.config.AppName }
+func (a *ComposioAdapter) ComposioAppName() string          { return a.config.AppName }
 
 // Tools returns MCP tool definitions prefixed with the platform name.
 func (a *ComposioAdapter) Tools() []mcp.Tool {
