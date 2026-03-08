@@ -186,6 +186,11 @@ func (m *Manager) HandleComposioCallback(ctx context.Context, state string) (*mo
 	if conn.Status == "ACTIVE" {
 		account.Status = models.StatusActive
 		account.StatusReason = ""
+		// Update to the final Composio account ID (ca_xxx format), which may differ
+		// from the initial UUID returned by InitiateConnection.
+		if conn.ID != "" && conn.ID != account.AccessToken {
+			account.AccessToken = conn.ID
+		}
 	} else {
 		account.Status = models.StatusFailed
 		account.StatusReason = fmt.Sprintf("composio connection status: %s", conn.Status)
