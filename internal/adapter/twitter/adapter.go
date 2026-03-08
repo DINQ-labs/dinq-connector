@@ -12,8 +12,8 @@ import (
 // Composio action IDs for Twitter.
 // Verify these in the Composio dashboard: https://app.composio.dev
 const (
-	ActionCreateTweet = "TWITTER_CREATION_OF_A_TWEET"
-	ActionDeleteTweet = "TWITTER_TWEET_DELETE"
+	ActionCreateTweet = "TWITTER_CREATION_OF_A_POST"
+	ActionDeleteTweet = "TWITTER_POST_DELETE_BY_POST_ID"
 	ActionGetMe       = "TWITTER_USER_LOOKUP_ME"
 )
 
