@@ -1,6 +1,13 @@
 // Package mcpserver bridges platform adapters into a single MCP endpoint.
-// All adapter tools are registered with the MCP server, and each tool call
-// automatically resolves the user's token from the connected accounts store.
+//
+// Instead of registering 200+ individual tools, we expose 4 meta tools:
+//   - connector_list_accounts: check which platforms are connected
+//   - connector_connect: initiate OAuth for a platform
+//   - connector_discover_tools: discover available actions for a platform
+//   - connector_execute: execute a specific action on a platform
+//
+// This "lazy tool discovery" pattern keeps the tool count minimal and lets
+// the LLM discover and call platform actions on demand.
 package mcpserver
 
 import (
@@ -25,10 +32,10 @@ type Config struct {
 
 // Server wraps the MCP server with adapter + auth integration.
 type Server struct {
-	mcpServer  *server.MCPServer
-	registry   *adapter.Registry
-	authMgr    *auth.Manager
-	config     Config
+	mcpServer *server.MCPServer
+	registry  *adapter.Registry
+	authMgr   *auth.Manager
+	config    Config
 }
 
 // New creates a new MCP server backed by the adapter registry.
@@ -42,7 +49,7 @@ func New(registry *adapter.Registry, authMgr *auth.Manager, cfg Config) *Server 
 
 	mcpSrv := server.NewMCPServer(
 		"dinq-connector",
-		"0.1.0",
+		"0.2.0",
 		server.WithToolCapabilities(true),
 	)
 
@@ -53,23 +60,19 @@ func New(registry *adapter.Registry, authMgr *auth.Manager, cfg Config) *Server 
 		config:    cfg,
 	}
 
-	s.registerTools()
+	s.registerMetaTools()
 	return s
 }
 
-// registerTools registers all adapter tools with the MCP server.
-// Each tool gets a handler that resolves user_id → token → adapter.Execute().
-func (s *Server) registerTools() {
+// registerMetaTools registers only the 4 meta tools — no per-platform tools.
+func (s *Server) registerMetaTools() {
+	// Build platform list for descriptions
+	var platformNames []string
 	for _, a := range s.registry.List() {
-		for _, tool := range a.Tools() {
-			// Inject user_id parameter into every tool
-			tool = injectUserIDParam(tool)
-			s.mcpServer.AddTool(tool, s.makeHandler(a))
-			log.Printf("[MCP] Registered tool: %s", tool.Name)
-		}
+		platformNames = append(platformNames, a.Name())
 	}
+	platformList := strings.Join(platformNames, ", ")
 
-	// Meta tool: list connected platforms for a user
 	s.mcpServer.AddTool(
 		mcp.NewTool("connector_list_accounts",
 			mcp.WithDescription("List all connected platform accounts for a user. Shows which platforms are connected and their status."),
@@ -78,53 +81,36 @@ func (s *Server) registerTools() {
 		s.handleListAccounts,
 	)
 
-	// Meta tool: initiate platform connection
 	s.mcpServer.AddTool(
 		mcp.NewTool("connector_connect",
 			mcp.WithDescription("Start connecting a user to a platform. Returns an authorization URL the user must visit to grant access."),
 			mcp.WithString("user_id", mcp.Required(), mcp.Description("User ID")),
-			mcp.WithString("platform", mcp.Required(), mcp.Description("Platform to connect (lowercase): github, twitter, linkedin, gmail, googlecalendar, googlesheets, notion, slack, discord, outlook, reddit")),
+			mcp.WithString("platform", mcp.Required(), mcp.Description("Platform to connect: "+platformList)),
 			mcp.WithString("callback_url", mcp.Description("URL to redirect after authorization")),
 		),
 		s.handleConnect,
 	)
-}
 
-// makeHandler creates an MCP tool handler that resolves user token and delegates to adapter.
-func (s *Server) makeHandler(a adapter.PlatformAdapter) server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// Extract user_id from args
-		userID, ok := req.GetArguments()["user_id"].(string)
-		if !ok || userID == "" {
-			return mcp.NewToolResultError("user_id is required"), nil
-		}
+	s.mcpServer.AddTool(
+		mcp.NewTool("connector_discover_tools",
+			mcp.WithDescription("Discover available actions/tools for a specific platform. Returns action names, descriptions, and parameter schemas. Call this BEFORE connector_execute to know what actions and parameters are available."),
+			mcp.WithString("platform", mcp.Required(), mcp.Description("Platform to discover tools for: "+platformList)),
+		),
+		s.handleDiscoverTools,
+	)
 
-		// Get active token for this user+platform
-		token, err := s.authMgr.GetActiveToken(ctx, userID, a.Name())
-		if err != nil {
-			// User not connected — return helpful message
-			return mcp.NewToolResultError(fmt.Sprintf(
-				"User not connected to %s. Use connector_connect tool to initiate authorization.",
-				a.DisplayName(),
-			)), nil
-		}
+	s.mcpServer.AddTool(
+		mcp.NewTool("connector_execute",
+			mcp.WithDescription("Execute an action on a connected platform. Use connector_discover_tools first to find available actions and their parameters."),
+			mcp.WithString("user_id", mcp.Required(), mcp.Description("User ID")),
+			mcp.WithString("platform", mcp.Required(), mcp.Description("Platform name: "+platformList)),
+			mcp.WithString("action", mcp.Required(), mcp.Description("Action name (from connector_discover_tools)")),
+			mcp.WithObject("params", mcp.Description("Action-specific parameters (from connector_discover_tools schema)")),
+		),
+		s.handleExecute,
+	)
 
-		// Strip platform prefix from tool name to get the adapter-local name
-		_, localName, found := s.registry.FindAdapter(req.Params.Name)
-		if !found {
-			return mcp.NewToolResultError("unknown tool"), nil
-		}
-
-		// Build args map without user_id (adapter doesn't need it)
-		args := make(map[string]any)
-		for k, v := range req.GetArguments() {
-			if k != "user_id" {
-				args[k] = v
-			}
-		}
-
-		return a.Execute(ctx, localName, args, token)
-	}
+	log.Printf("[MCP] Registered 4 meta tools (platforms: %s)", platformList)
 }
 
 // handleListAccounts returns connected account status for a user.
@@ -140,7 +126,6 @@ func (s *Server) handleListAccounts(ctx context.Context, req mcp.CallToolRequest
 	}
 
 	if len(accounts) == 0 {
-		// List available platforms
 		var platforms []string
 		for _, a := range s.registry.List() {
 			platforms = append(platforms, a.Name())
@@ -186,6 +171,107 @@ func (s *Server) handleConnect(ctx context.Context, req mcp.CallToolRequest) (*m
 	)), nil
 }
 
+// toolInfo is the JSON structure returned by connector_discover_tools.
+type toolInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Parameters  any    `json:"parameters"`
+}
+
+// handleDiscoverTools returns available actions for a platform with schemas.
+func (s *Server) handleDiscoverTools(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	platform, _ := req.GetArguments()["platform"].(string)
+	platform = strings.ToLower(platform)
+
+	if platform == "" {
+		return mcp.NewToolResultError("platform is required"), nil
+	}
+
+	a := s.registry.Get(platform)
+	if a == nil {
+		return mcp.NewToolResultError(fmt.Sprintf("unknown platform: %s", platform)), nil
+	}
+
+	tools := a.Tools()
+	prefix := a.Name() + "_"
+
+	result := make([]toolInfo, 0, len(tools))
+	for _, t := range tools {
+		// Strip platform prefix: "gmail_send_email" → "send_email"
+		actionName := strings.TrimPrefix(t.Name, prefix)
+
+		// Strip user_id from parameters (injected by us, not by LLM in this mode)
+		params := t.InputSchema
+		if params.Properties != nil {
+			cleaned := make(map[string]any, len(params.Properties))
+			for k, v := range params.Properties {
+				if k != "user_id" {
+					cleaned[k] = v
+				}
+			}
+			params.Properties = cleaned
+		}
+		var cleanedRequired []string
+		for _, r := range params.Required {
+			if r != "user_id" {
+				cleanedRequired = append(cleanedRequired, r)
+			}
+		}
+		params.Required = cleanedRequired
+
+		result = append(result, toolInfo{
+			Name:        actionName,
+			Description: t.Description,
+			Parameters:  params,
+		})
+	}
+
+	data, _ := json.MarshalIndent(map[string]any{
+		"platform":    platform,
+		"displayName": a.DisplayName(),
+		"toolCount":   len(result),
+		"tools":       result,
+	}, "", "  ")
+
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+// handleExecute runs a specific action on a platform.
+func (s *Server) handleExecute(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := req.GetArguments()
+	userID, _ := args["user_id"].(string)
+	platform, _ := args["platform"].(string)
+	action, _ := args["action"].(string)
+
+	platform = strings.ToLower(platform)
+
+	if userID == "" || platform == "" || action == "" {
+		return mcp.NewToolResultError("user_id, platform, and action are required"), nil
+	}
+
+	a := s.registry.Get(platform)
+	if a == nil {
+		return mcp.NewToolResultError(fmt.Sprintf("unknown platform: %s", platform)), nil
+	}
+
+	// Get active token
+	token, err := s.authMgr.GetActiveToken(ctx, userID, platform)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf(
+			"User not connected to %s. Use connector_connect to initiate authorization.",
+			a.DisplayName(),
+		)), nil
+	}
+
+	// Extract params (nested object)
+	params := make(map[string]any)
+	if p, ok := args["params"].(map[string]any); ok {
+		params = p
+	}
+
+	return a.Execute(ctx, action, params, token)
+}
+
 // Start starts the MCP server on the configured port.
 func (s *Server) Start() error {
 	addr := fmt.Sprintf(":%d", s.config.Port)
@@ -195,22 +281,4 @@ func (s *Server) Start() error {
 
 	log.Printf("[MCP] dinq-connector listening on %s%s", addr, s.config.Endpoint)
 	return httpServer.Start(addr)
-}
-
-// injectUserIDParam adds a user_id parameter to a tool definition.
-func injectUserIDParam(tool mcp.Tool) mcp.Tool {
-	schema := tool.InputSchema
-	if schema.Properties == nil {
-		schema.Properties = make(map[string]any)
-	}
-	schema.Properties["user_id"] = map[string]any{
-		"type":        "string",
-		"description": "User ID for authenticated access",
-	}
-
-	// Add user_id to required
-	schema.Required = append(schema.Required, "user_id")
-	tool.InputSchema = schema
-
-	return tool
 }
