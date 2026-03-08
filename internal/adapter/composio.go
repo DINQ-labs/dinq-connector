@@ -160,16 +160,23 @@ func (a *ComposioAdapter) Execute(ctx context.Context, toolName string, args map
 		return mcp.NewToolResultError(fmt.Sprintf("unknown tool: %s", toolName)), nil
 	}
 
-	// Always use the latest Composio toolkit version to avoid stale LinkedIn/API versions.
-	const latestVersion = "20260307_00"
-
 	resp, err := a.client.ExecuteAction(ctx, actionID, composio.ExecuteActionRequest{
 		ConnectedAccountID: accessToken,
 		Input:              args,
-		Version:            latestVersion,
 	})
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Composio error: %s", err)), nil
+	}
+	// If LinkedIn API version is stale (426), retry with the latest toolkit version.
+	if !resp.Successful && strings.Contains(resp.Error, "426") {
+		resp, err = a.client.ExecuteAction(ctx, actionID, composio.ExecuteActionRequest{
+			ConnectedAccountID: accessToken,
+			Input:              args,
+			Version:            "20260307_00",
+		})
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Composio error: %s", err)), nil
+		}
 	}
 	if !resp.Successful {
 		errMsg := resp.Error
