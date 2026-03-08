@@ -14,9 +14,9 @@ import (
 
 // ComposioToolMapping maps a local tool name to a Composio action.
 type ComposioToolMapping struct {
-	LocalName      string              // e.g. "create_tweet" (without platform prefix)
-	ComposioAction string              // e.g. "TWITTER_CREATION_OF_A_TWEET"
-	Version        string              // e.g. "20260307_00" — used when executing
+	LocalName      string // e.g. "create_tweet" (without platform prefix)
+	ComposioAction string // e.g. "TWITTER_CREATION_OF_A_TWEET"
+	Version        string // e.g. "20260307_00" — used when executing
 	Description    string
 	InputSchema    mcp.ToolInputSchema
 }
@@ -121,9 +121,9 @@ func NewDynamicComposioAdapter(ctx context.Context, client *composio.Client, pla
 	}), nil
 }
 
-func (a *ComposioAdapter) Name() string        { return a.config.Platform }
-func (a *ComposioAdapter) DisplayName() string  { return a.config.DisplayName_ }
-func (a *ComposioAdapter) AuthScheme() AuthScheme { return AuthComposio }
+func (a *ComposioAdapter) Name() string              { return a.config.Platform }
+func (a *ComposioAdapter) DisplayName() string       { return a.config.DisplayName_ }
+func (a *ComposioAdapter) AuthScheme() AuthScheme    { return AuthComposio }
 func (a *ComposioAdapter) OAuthConfig() *OAuthConfig { return nil }
 
 // ComposioAuthProvider methods (used by auth manager)
@@ -148,11 +148,12 @@ func (a *ComposioAdapter) Tools() []mcp.Tool {
 // Execute runs a tool via the Composio API.
 // For Composio adapters, the "accessToken" parameter is the Composio connectedAccountId.
 func (a *ComposioAdapter) Execute(ctx context.Context, toolName string, args map[string]any, accessToken string) (*mcp.CallToolResult, error) {
-	// Find the Composio action ID for this tool
-	var actionID string
+	// Find the Composio action ID and version for this tool
+	var actionID, actionVersion string
 	for _, t := range a.config.Tools_ {
 		if t.LocalName == toolName {
 			actionID = t.ComposioAction
+			actionVersion = t.Version
 			break
 		}
 	}
@@ -160,23 +161,13 @@ func (a *ComposioAdapter) Execute(ctx context.Context, toolName string, args map
 		return mcp.NewToolResultError(fmt.Sprintf("unknown tool: %s", toolName)), nil
 	}
 
-	resp, err := a.client.ExecuteAction(ctx, actionID, composio.ExecuteActionRequest{
+	resp, err := a.client.ExecuteTool(ctx, actionID, composio.ExecuteToolRequest{
 		ConnectedAccountID: accessToken,
-		Input:              args,
+		Arguments:          args,
+		Version:            actionVersion,
 	})
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Composio error: %s", err)), nil
-	}
-	// If LinkedIn API version is stale (426), retry with the latest toolkit version.
-	if !resp.Successful && strings.Contains(resp.Error, "426") {
-		resp, err = a.client.ExecuteAction(ctx, actionID, composio.ExecuteActionRequest{
-			ConnectedAccountID: accessToken,
-			Input:              args,
-			Version:            "20260307_00",
-		})
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Composio error: %s", err)), nil
-		}
 	}
 	if !resp.Successful {
 		errMsg := resp.Error

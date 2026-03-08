@@ -161,29 +161,53 @@ func (c *Client) ListActions(ctx context.Context, appName string, limit int) ([]
 	return resp.Items, nil
 }
 
-// ExecuteActionRequest is the input for executing a Composio action.
-type ExecuteActionRequest struct {
-	ConnectedAccountID string         `json:"connectedAccountId"`
-	Input              map[string]any `json:"input,omitempty"`
-	EntityID           string         `json:"entityId,omitempty"`
+// ExecuteToolRequest is the input for the Composio v3 tools execute API.
+type ExecuteToolRequest struct {
+	ConnectedAccountID string         `json:"connected_account_id,omitempty"`
+	UserID             string         `json:"user_id,omitempty"`
+	Arguments          map[string]any `json:"arguments,omitempty"`
 	Version            string         `json:"version,omitempty"`
 }
 
-// ExecuteActionResponse is the output of a Composio action execution.
+// ExecuteActionResponse is the unified output returned to callers after tool execution.
 type ExecuteActionResponse struct {
 	Data       any    `json:"data"`
 	Error      string `json:"error,omitempty"`
-	Successful bool   `json:"successfull"` // Composio API uses this spelling
+	Successful bool   `json:"successful"`
 }
 
-// ExecuteAction runs an action via Composio.
-func (c *Client) ExecuteAction(ctx context.Context, actionID string, req ExecuteActionRequest) (*ExecuteActionResponse, error) {
-	var resp ExecuteActionResponse
-	err := c.post(ctx, "/v2/actions/"+actionID+"/execute", req, &resp)
+// executeToolV3Response is the raw envelope from POST /v3/tools/execute/{slug}.
+type executeToolV3Response struct {
+	Data struct {
+		Results []struct {
+			Response struct {
+				Successful bool   `json:"successful"`
+				Data       any    `json:"data"`
+				Error      string `json:"error,omitempty"`
+			} `json:"response"`
+			ToolSlug string `json:"tool_slug"`
+		} `json:"results"`
+	} `json:"data"`
+	Successful bool `json:"successful"`
+}
+
+// ExecuteTool runs a tool via the Composio v3 tools API.
+// connectedAccountID is the Composio connected account UUID.
+func (c *Client) ExecuteTool(ctx context.Context, toolSlug string, req ExecuteToolRequest) (*ExecuteActionResponse, error) {
+	var v3resp executeToolV3Response
+	err := c.post(ctx, "/v3/tools/execute/"+url.PathEscape(toolSlug), req, &v3resp)
 	if err != nil {
 		return nil, err
 	}
-	return &resp, nil
+	if len(v3resp.Data.Results) == 0 {
+		return nil, fmt.Errorf("composio v3: no results for %s", toolSlug)
+	}
+	r := v3resp.Data.Results[0]
+	return &ExecuteActionResponse{
+		Data:       r.Response.Data,
+		Error:      r.Response.Error,
+		Successful: r.Response.Successful,
+	}, nil
 }
 
 // ---------------------------------------------------------------------------
