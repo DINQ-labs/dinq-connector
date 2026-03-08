@@ -192,15 +192,44 @@ type executeToolV3Response struct {
 }
 
 // ExecuteTool runs a tool via the Composio v3 tools API.
-// connectedAccountID is the Composio connected account UUID.
 func (c *Client) ExecuteTool(ctx context.Context, toolSlug string, req ExecuteToolRequest) (*ExecuteActionResponse, error) {
-	var v3resp executeToolV3Response
-	err := c.post(ctx, "/v3/tools/execute/"+url.PathEscape(toolSlug), req, &v3resp)
+	bodyData, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
+	httpReq, err := http.NewRequestWithContext(ctx, "POST",
+		c.baseURL+"/v3/tools/execute/"+url.PathEscape(toolSlug),
+		bytes.NewReader(bodyData),
+	)
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("x-api-key", c.apiKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("composio request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("composio read body: %w", err)
+	}
+
+	log.Printf("[Composio] ExecuteTool %s status=%d body=%s", toolSlug, resp.StatusCode, truncateLog(string(raw), 500))
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("composio API error %d: %s", resp.StatusCode, string(raw))
+	}
+
+	var v3resp executeToolV3Response
+	if err := json.Unmarshal(raw, &v3resp); err != nil {
+		return nil, fmt.Errorf("composio decode: %w", err)
+	}
 	if len(v3resp.Data.Results) == 0 {
-		return nil, fmt.Errorf("composio v3: no results for %s", toolSlug)
+		return nil, fmt.Errorf("composio v3: no results for %s (raw: %s)", toolSlug, truncateLog(string(raw), 300))
 	}
 	r := v3resp.Data.Results[0]
 	return &ExecuteActionResponse{
@@ -208,6 +237,13 @@ func (c *Client) ExecuteTool(ctx context.Context, toolSlug string, req ExecuteTo
 		Error:      r.Response.Error,
 		Successful: r.Response.Successful,
 	}, nil
+}
+
+func truncateLog(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 // ---------------------------------------------------------------------------
