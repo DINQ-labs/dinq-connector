@@ -270,7 +270,7 @@ func (s *Server) handleExecute(ctx context.Context, req mcp.CallToolRequest) (*m
 		params = p
 	}
 
-	return a.Execute(ctx, action, params, token)
+	return a.Execute(ctx, action, params, token, userID)
 }
 
 // NewHandler returns an http.Handler for embedding in a shared mux.

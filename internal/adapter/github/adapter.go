@@ -21,8 +21,8 @@ type Adapter struct{}
 
 func New() *Adapter { return &Adapter{} }
 
-func (a *Adapter) Name() string        { return "github" }
-func (a *Adapter) DisplayName() string  { return "GitHub" }
+func (a *Adapter) Name() string                   { return "github" }
+func (a *Adapter) DisplayName() string            { return "GitHub" }
 func (a *Adapter) AuthScheme() adapter.AuthScheme { return adapter.AuthOAuth2 }
 
 func (a *Adapter) OAuthConfig() *adapter.OAuthConfig {
@@ -70,7 +70,7 @@ func (a *Adapter) Tools() []mcp.Tool {
 	}
 }
 
-func (a *Adapter) Execute(ctx context.Context, toolName string, args map[string]any, token string) (*mcp.CallToolResult, error) {
+func (a *Adapter) Execute(ctx context.Context, toolName string, args map[string]any, token, _ string) (*mcp.CallToolResult, error) {
 	switch toolName {
 	case "get_user":
 		return a.getUser(ctx, token)
@@ -286,9 +286,17 @@ func truncate(s string, n int) string {
 	return s[:n] + "..."
 }
 
-type bytesReader struct{ data []byte; pos int }
+type bytesReader struct {
+	data []byte
+	pos  int
+}
+
 func (r *bytesReader) Read(p []byte) (int, error) {
-	if r.pos >= len(r.data) { return 0, io.EOF }
-	n := copy(p, r.data[r.pos:]); r.pos += n; return n, nil
+	if r.pos >= len(r.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[r.pos:])
+	r.pos += n
+	return n, nil
 }
 func jsonReader(data []byte) io.Reader { return &bytesReader{data: data} }

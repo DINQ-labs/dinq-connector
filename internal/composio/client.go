@@ -165,7 +165,7 @@ func (c *Client) ListActions(ctx context.Context, appName string, limit int) ([]
 type ExecuteToolRequest struct {
 	ConnectedAccountID string         `json:"connected_account_id,omitempty"`
 	UserID             string         `json:"user_id,omitempty"`
-	Arguments          map[string]any `json:"arguments,omitempty"`
+	Arguments          map[string]any `json:"arguments"` // always send — v3 requires exactly one of 'text' or 'arguments'
 	Version            string         `json:"version,omitempty"`
 }
 

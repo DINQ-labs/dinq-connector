@@ -146,8 +146,8 @@ func (a *ComposioAdapter) Tools() []mcp.Tool {
 }
 
 // Execute runs a tool via the Composio API.
-// For Composio adapters, the "accessToken" parameter is the Composio connectedAccountId.
-func (a *ComposioAdapter) Execute(ctx context.Context, toolName string, args map[string]any, accessToken string) (*mcp.CallToolResult, error) {
+// accessToken is the Composio connectedAccountId; userID is the entity ID required by v3.
+func (a *ComposioAdapter) Execute(ctx context.Context, toolName string, args map[string]any, accessToken, userID string) (*mcp.CallToolResult, error) {
 	// Find the Composio action ID and version for this tool
 	var actionID, actionVersion string
 	for _, t := range a.config.Tools_ {
@@ -161,8 +161,13 @@ func (a *ComposioAdapter) Execute(ctx context.Context, toolName string, args map
 		return mcp.NewToolResultError(fmt.Sprintf("unknown tool: %s", toolName)), nil
 	}
 
+	if args == nil {
+		args = map[string]any{}
+	}
+
 	resp, err := a.client.ExecuteTool(ctx, actionID, composio.ExecuteToolRequest{
 		ConnectedAccountID: accessToken,
+		UserID:             userID,
 		Arguments:          args,
 		Version:            actionVersion,
 	})

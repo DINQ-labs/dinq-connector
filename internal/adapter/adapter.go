@@ -50,9 +50,10 @@ type PlatformAdapter interface {
 	// Each tool name should be prefixed with the platform name: "github_list_repos".
 	Tools() []mcp.Tool
 
-	// Execute runs a tool call with the user's access token.
+	// Execute runs a tool call with the user's access token and user ID.
 	// toolName is the unprefixed name (e.g. "list_repos", not "github_list_repos").
-	Execute(ctx context.Context, toolName string, args map[string]any, accessToken string) (*mcp.CallToolResult, error)
+	// userID is the platform entity identifier (e.g. dinq user UUID), needed by some backends.
+	Execute(ctx context.Context, toolName string, args map[string]any, accessToken, userID string) (*mcp.CallToolResult, error)
 }
 
 // ToolHandler wraps an adapter's Execute method for use with the MCP server.
