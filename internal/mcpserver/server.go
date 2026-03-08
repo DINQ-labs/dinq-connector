@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -272,7 +273,22 @@ func (s *Server) handleExecute(ctx context.Context, req mcp.CallToolRequest) (*m
 	return a.Execute(ctx, action, params, token)
 }
 
-// Start starts the MCP server on the configured port.
+// NewHandler returns an http.Handler for embedding in a shared mux.
+// This allows MCP and HTTP API to share the same port.
+func NewHandler(registry *adapter.Registry, authMgr *auth.Manager, endpoint string) http.Handler {
+	s := &Server{
+		mcpServer: server.NewMCPServer("dinq-connector", "0.2.0", server.WithToolCapabilities(true)),
+		registry:  registry,
+		authMgr:   authMgr,
+		config:    Config{Endpoint: endpoint},
+	}
+	s.registerMetaTools()
+	sh := server.NewStreamableHTTPServer(s.mcpServer, server.WithEndpointPath(endpoint))
+	log.Printf("[MCP] dinq-connector handler at %s", endpoint)
+	return sh
+}
+
+// Start starts the MCP server on the configured port (standalone mode).
 func (s *Server) Start() error {
 	addr := fmt.Sprintf(":%d", s.config.Port)
 	httpServer := server.NewStreamableHTTPServer(s.mcpServer,

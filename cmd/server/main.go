@@ -27,7 +27,6 @@ func main() {
 	databaseURL := envOrDefault("DATABASE_URL", "postgres://localhost:5432/dinq_connector?sslmode=disable")
 	baseURL := envOrDefault("BASE_URL", "http://localhost:8091")
 	port := envIntOrDefault("PORT", 8091)
-	mcpPort := envIntOrDefault("MCP_PORT", 0) // 0 = same port
 
 	// --- Database ---
 	store, err := db.New(databaseURL)
@@ -111,50 +110,20 @@ func main() {
 		log.Println("[Auth] GitHub OAuth configured")
 	}
 
-	// --- HTTP API ---
+	// --- HTTP API + MCP on same port ---
+	// MCP at /mcp, HTTP API (OAuth callbacks, health) at everything else.
 	httpHandler := httpapi.New(authMgr, registry)
+	mcpHandler := mcpserver.NewHandler(registry, authMgr, "/mcp")
 
-	// --- MCP Server ---
-	if mcpPort == 0 || mcpPort == port {
-		mcpSrv := mcpserver.New(registry, authMgr, mcpserver.Config{
-			Port:     port,
-			Endpoint: "/mcp",
-		})
+	mux := http.NewServeMux()
+	mux.Handle("/mcp", mcpHandler)
+	mux.Handle("/mcp/", mcpHandler)
+	mux.Handle("/", httpHandler.Handler())
 
-		mux := http.NewServeMux()
-		mux.Handle("/", httpHandler.Handler())
-
-		log.Printf("[Server] Starting on :%d (HTTP API + MCP at /mcp)", port)
-
-		go func() {
-			if err := mcpSrv.Start(); err != nil {
-				log.Fatalf("MCP server error: %v", err)
-			}
-		}()
-
-		httpAddr := ":" + strconv.Itoa(port+1)
-		log.Printf("[HTTP] API server on %s", httpAddr)
-		if err := http.ListenAndServe(httpAddr, mux); err != nil {
-			log.Fatalf("HTTP server error: %v", err)
-		}
-	} else {
-		mcpSrv := mcpserver.New(registry, authMgr, mcpserver.Config{
-			Port:     mcpPort,
-			Endpoint: "/mcp",
-		})
-
-		go func() {
-			log.Printf("[MCP] Starting on :%d/mcp", mcpPort)
-			if err := mcpSrv.Start(); err != nil {
-				log.Fatalf("MCP server error: %v", err)
-			}
-		}()
-
-		httpAddr := ":" + strconv.Itoa(port)
-		log.Printf("[HTTP] Starting on %s", httpAddr)
-		if err := http.ListenAndServe(httpAddr, httpHandler.Handler()); err != nil {
-			log.Fatalf("HTTP server error: %v", err)
-		}
+	addr := ":" + strconv.Itoa(port)
+	log.Printf("[Server] Starting on %s (HTTP API + MCP at /mcp)", addr)
+	if err := http.ListenAndServe(addr, mux); err != nil {
+		log.Fatalf("Server error: %v", err)
 	}
 }
 
