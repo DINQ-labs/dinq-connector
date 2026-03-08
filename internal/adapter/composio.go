@@ -165,9 +165,9 @@ func (a *ComposioAdapter) Execute(ctx context.Context, toolName string, args map
 	}
 
 	resp, err := a.client.ExecuteTool(ctx, actionID, composio.ExecuteToolRequest{
-		UserID:    userID, // let Composio v3 auto-select the connection by entity ID
+		UserID:    userID,
 		Arguments: args,
-		// Version intentionally omitted — let Composio use the latest action version
+		Version:   "20260307_00", // pin to a known-good action version; avoids stale LinkedIn API version (426)
 	})
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Composio error: %s", err)), nil
