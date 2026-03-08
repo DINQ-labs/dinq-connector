@@ -177,18 +177,11 @@ type ExecuteActionResponse struct {
 }
 
 // executeToolV3Response is the raw envelope from POST /v3/tools/execute/{slug}.
+// Actual structure: {"data": <tool-specific object>, "successful": bool, "error": null|string}
 type executeToolV3Response struct {
-	Data struct {
-		Results []struct {
-			Response struct {
-				Successful bool   `json:"successful"`
-				Data       any    `json:"data"`
-				Error      string `json:"error,omitempty"`
-			} `json:"response"`
-			ToolSlug string `json:"tool_slug"`
-		} `json:"results"`
-	} `json:"data"`
+	Data       any  `json:"data"`
 	Successful bool `json:"successful"`
+	Error      any  `json:"error"` // null or string
 }
 
 // ExecuteTool runs a tool via the Composio v3 tools API.
@@ -228,14 +221,14 @@ func (c *Client) ExecuteTool(ctx context.Context, toolSlug string, req ExecuteTo
 	if err := json.Unmarshal(raw, &v3resp); err != nil {
 		return nil, fmt.Errorf("composio decode: %w", err)
 	}
-	if len(v3resp.Data.Results) == 0 {
-		return nil, fmt.Errorf("composio v3: no results for %s (raw: %s)", toolSlug, truncateLog(string(raw), 300))
+	var errStr string
+	if s, ok := v3resp.Error.(string); ok {
+		errStr = s
 	}
-	r := v3resp.Data.Results[0]
 	return &ExecuteActionResponse{
-		Data:       r.Response.Data,
-		Error:      r.Response.Error,
-		Successful: r.Response.Successful,
+		Data:       v3resp.Data,
+		Error:      errStr,
+		Successful: v3resp.Successful,
 	}, nil
 }
 

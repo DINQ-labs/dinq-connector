@@ -149,11 +149,10 @@ func (a *ComposioAdapter) Tools() []mcp.Tool {
 // accessToken is the Composio connectedAccountId; userID is the entity ID required by v3.
 func (a *ComposioAdapter) Execute(ctx context.Context, toolName string, args map[string]any, accessToken, userID string) (*mcp.CallToolResult, error) {
 	// Find the Composio action ID and version for this tool
-	var actionID, actionVersion string
+	var actionID string
 	for _, t := range a.config.Tools_ {
 		if t.LocalName == toolName {
 			actionID = t.ComposioAction
-			actionVersion = t.Version
 			break
 		}
 	}
@@ -168,7 +167,7 @@ func (a *ComposioAdapter) Execute(ctx context.Context, toolName string, args map
 	resp, err := a.client.ExecuteTool(ctx, actionID, composio.ExecuteToolRequest{
 		UserID:    userID, // let Composio v3 auto-select the connection by entity ID
 		Arguments: args,
-		Version:   actionVersion,
+		// Version intentionally omitted — let Composio use the latest action version
 	})
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Composio error: %s", err)), nil
