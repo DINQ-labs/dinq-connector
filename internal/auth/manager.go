@@ -124,6 +124,7 @@ func (m *Manager) initiateComposioAuth(ctx context.Context, a adapter.PlatformAd
 
 	resp, err := cap.ComposioClient().InitiateConnection(ctx, composio.InitiateConnectionRequest{
 		IntegrationID: cap.IntegrationID(),
+		EntityID:      userID,
 		RedirectURI:   composioCallback,
 	})
 	if err != nil {
@@ -187,12 +188,18 @@ func (m *Manager) HandleComposioCallback(ctx context.Context, state string) (*mo
 	if conn.Status == "ACTIVE" {
 		account.Status = models.StatusActive
 		account.StatusReason = ""
-		// Update to the final Composio account ID (ca_xxx format), which may differ
-		// from the initial UUID returned by InitiateConnection.
-		log.Printf("[Auth] Composio callback: stored=%s composio_id=%s", account.AccessToken, conn.ID)
-		if conn.ID != "" && conn.ID != account.AccessToken {
-			log.Printf("[Auth] Updating access_token: %s -> %s", account.AccessToken, conn.ID)
-			account.AccessToken = conn.ID
+		// The UUID from InitiateConnection is a pending flow ID.
+		// After OAuth, Composio creates a canonical ca_xxx account.
+		// Use ListConnections to find the real connectedAccountId for this user+app.
+		if conns, listErr := cap.ComposioClient().ListConnections(ctx, pending.UserID, cap.ComposioAppName()); listErr == nil && len(conns) > 0 {
+			log.Printf("[Auth] Resolved connectedAccountId: %s -> %s (via ListConnections)", account.AccessToken, conns[0].ID)
+			account.AccessToken = conns[0].ID
+		} else {
+			// Fallback: use conn.ID from GetConnection
+			log.Printf("[Auth] Composio callback: stored=%s conn.ID=%s", account.AccessToken, conn.ID)
+			if conn.ID != "" && conn.ID != account.AccessToken {
+				account.AccessToken = conn.ID
+			}
 		}
 	} else {
 		account.Status = models.StatusFailed

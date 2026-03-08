@@ -39,8 +39,9 @@ func NewClient(apiKey string) *Client {
 
 // InitiateConnectionRequest is the input for initiating a user connection.
 type InitiateConnectionRequest struct {
-	IntegrationID string         `json:"integrationId"`        // UUID from /v1/integrations
-	Data          map[string]any `json:"data"`                 // empty object required
+	IntegrationID string         `json:"integrationId"`      // UUID from /v1/integrations
+	EntityID      string         `json:"entityId,omitempty"` // user entity; set to our user_id
+	Data          map[string]any `json:"data"`               // empty object required
 	RedirectURI   string         `json:"redirectUri,omitempty"`
 }
 
@@ -89,7 +90,7 @@ func (c *Client) GetIntegrations(ctx context.Context) (map[string]Integration, e
 // ConnectedAccount represents a user's connection to a platform in Composio.
 type ConnectedAccount struct {
 	ID      string `json:"id"`
-	Status  string `json:"status"`  // ACTIVE, INITIATED, EXPIRED, FAILED
+	Status  string `json:"status"` // ACTIVE, INITIATED, EXPIRED, FAILED
 	AppName string `json:"appName"`
 }
 
@@ -132,7 +133,7 @@ type Action struct {
 	DisplayName string           `json:"displayName"` // e.g. "Send Email"
 	Description string           `json:"description"`
 	AppName     string           `json:"appName"`
-	Version     string           `json:"version"`     // e.g. "20260307_00"
+	Version     string           `json:"version"` // e.g. "20260307_00"
 	Parameters  ActionParameters `json:"parameters"`
 }
 
