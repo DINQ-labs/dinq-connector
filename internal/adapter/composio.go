@@ -16,6 +16,7 @@ import (
 type ComposioToolMapping struct {
 	LocalName      string              // e.g. "create_tweet" (without platform prefix)
 	ComposioAction string              // e.g. "TWITTER_CREATION_OF_A_TWEET"
+	Version        string              // e.g. "20260307_00" — used when executing
 	Description    string
 	InputSchema    mcp.ToolInputSchema
 }
@@ -94,6 +95,7 @@ func NewDynamicComposioAdapter(ctx context.Context, client *composio.Client, pla
 		tools = append(tools, ComposioToolMapping{
 			LocalName:      localName,
 			ComposioAction: a.Name,
+			Version:        a.Version,
 			Description:    desc,
 			InputSchema: mcp.ToolInputSchema{
 				Type:       "object",
@@ -146,11 +148,12 @@ func (a *ComposioAdapter) Tools() []mcp.Tool {
 // Execute runs a tool via the Composio API.
 // For Composio adapters, the "accessToken" parameter is the Composio connectedAccountId.
 func (a *ComposioAdapter) Execute(ctx context.Context, toolName string, args map[string]any, accessToken string) (*mcp.CallToolResult, error) {
-	// Find the Composio action ID for this tool
-	var actionID string
+	// Find the Composio action ID and version for this tool
+	var actionID, toolVersion string
 	for _, t := range a.config.Tools_ {
 		if t.LocalName == toolName {
 			actionID = t.ComposioAction
+			toolVersion = t.Version
 			break
 		}
 	}
@@ -161,6 +164,7 @@ func (a *ComposioAdapter) Execute(ctx context.Context, toolName string, args map
 	resp, err := a.client.ExecuteAction(ctx, actionID, composio.ExecuteActionRequest{
 		ConnectedAccountID: accessToken,
 		Input:              args,
+		Version:            toolVersion,
 	})
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Composio error: %s", err)), nil

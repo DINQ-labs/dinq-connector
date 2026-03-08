@@ -128,11 +128,12 @@ func (c *Client) ListConnections(ctx context.Context, userID, appName string) ([
 
 // Action represents a Composio action definition (from listing API).
 type Action struct {
-	Name        string            `json:"name"`        // e.g. "GMAIL_SEND_EMAIL"
-	DisplayName string            `json:"displayName"` // e.g. "Send Email"
-	Description string            `json:"description"`
-	AppName     string            `json:"appName"`
-	Parameters  ActionParameters  `json:"parameters"`
+	Name        string           `json:"name"`        // e.g. "GMAIL_SEND_EMAIL"
+	DisplayName string           `json:"displayName"` // e.g. "Send Email"
+	Description string           `json:"description"`
+	AppName     string           `json:"appName"`
+	Version     string           `json:"version"`     // e.g. "20260307_00"
+	Parameters  ActionParameters `json:"parameters"`
 }
 
 // ActionParameters holds the JSON Schema for an action's input.
@@ -164,6 +165,7 @@ type ExecuteActionRequest struct {
 	ConnectedAccountID string         `json:"connectedAccountId"`
 	Input              map[string]any `json:"input,omitempty"`
 	EntityID           string         `json:"entityId,omitempty"`
+	Version            string         `json:"version,omitempty"`
 }
 
 // ExecuteActionResponse is the output of a Composio action execution.
