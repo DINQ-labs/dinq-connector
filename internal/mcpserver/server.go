@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -82,7 +83,7 @@ func (s *Server) registerTools() {
 		mcp.NewTool("connector_connect",
 			mcp.WithDescription("Start connecting a user to a platform. Returns an authorization URL the user must visit to grant access."),
 			mcp.WithString("user_id", mcp.Required(), mcp.Description("User ID")),
-			mcp.WithString("platform", mcp.Required(), mcp.Description("Platform to connect: github, twitter, linkedin, google, slack, notion")),
+			mcp.WithString("platform", mcp.Required(), mcp.Description("Platform to connect (lowercase): github, twitter, linkedin, gmail, googlecalendar, googlesheets, notion, slack, discord, outlook, reddit")),
 			mcp.WithString("callback_url", mcp.Description("URL to redirect after authorization")),
 		),
 		s.handleConnect,
@@ -161,6 +162,8 @@ func (s *Server) handleConnect(ctx context.Context, req mcp.CallToolRequest) (*m
 	platform, _ := args["platform"].(string)
 	callbackURL, _ := args["callback_url"].(string)
 
+	platform = strings.ToLower(platform)
+
 	if userID == "" || platform == "" {
 		return mcp.NewToolResultError("user_id and platform are required"), nil
 	}
@@ -170,9 +173,14 @@ func (s *Server) handleConnect(ctx context.Context, req mcp.CallToolRequest) (*m
 		return mcp.NewToolResultError("failed to initiate OAuth: " + err.Error()), nil
 	}
 
+	displayName := platform
+	if a := s.registry.Get(platform); a != nil {
+		displayName = a.DisplayName()
+	}
+
 	return mcp.NewToolResultText(fmt.Sprintf(
 		"Please visit this URL to connect your %s account:\n%s\n\nAfter authorization, you can use %s tools.",
-		s.registry.Get(platform).DisplayName(),
+		displayName,
 		redirectURL,
 		platform,
 	)), nil
