@@ -115,9 +115,19 @@ func main() {
 	httpHandler := httpapi.New(authMgr, registry)
 	mcpHandler := mcpserver.NewHandler(registry, authMgr, "/mcp")
 
+	// Reject GET on /mcp — forces MCP clients to use POST-only (StreamableHTTP).
+	// Without this, clients waiting for an SSE endpoint event hang indefinitely.
+	noGet := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		mcpHandler.ServeHTTP(w, r)
+	})
+
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", mcpHandler)
-	mux.Handle("/mcp/", mcpHandler)
+	mux.Handle("/mcp", noGet)
+	mux.Handle("/mcp/", noGet)
 	mux.Handle("/", httpHandler.Handler())
 
 	addr := ":" + strconv.Itoa(port)
