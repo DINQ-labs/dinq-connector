@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -188,7 +189,9 @@ func (m *Manager) HandleComposioCallback(ctx context.Context, state string) (*mo
 		account.StatusReason = ""
 		// Update to the final Composio account ID (ca_xxx format), which may differ
 		// from the initial UUID returned by InitiateConnection.
+		log.Printf("[Auth] Composio callback: stored=%s composio_id=%s", account.AccessToken, conn.ID)
 		if conn.ID != "" && conn.ID != account.AccessToken {
+			log.Printf("[Auth] Updating access_token: %s -> %s", account.AccessToken, conn.ID)
 			account.AccessToken = conn.ID
 		}
 	} else {
