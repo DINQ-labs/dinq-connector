@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -272,13 +273,15 @@ func (s *Server) handleExecute(ctx context.Context, req mcp.CallToolRequest) (*m
 	return a.Execute(ctx, action, params, token)
 }
 
-// Start starts the MCP server on the configured port.
+// Start starts the MCP server on the configured port using SSE transport.
 func (s *Server) Start() error {
 	addr := fmt.Sprintf(":%d", s.config.Port)
-	httpServer := server.NewStreamableHTTPServer(s.mcpServer,
-		server.WithEndpointPath(s.config.Endpoint),
+	sseServer := server.NewSSEServer(s.mcpServer,
+		server.WithSSEContextFunc(func(ctx context.Context, r *http.Request) context.Context {
+			return ctx
+		}),
 	)
 
-	log.Printf("[MCP] dinq-connector listening on %s%s", addr, s.config.Endpoint)
-	return httpServer.Start(addr)
+	log.Printf("[MCP] dinq-connector listening on %s (SSE)", addr)
+	return sseServer.Start(addr)
 }
