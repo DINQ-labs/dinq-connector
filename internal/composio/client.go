@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"time"
@@ -121,7 +122,7 @@ func (c *Client) ListActions(ctx context.Context, appName string, limit int) ([]
 	if limit <= 0 {
 		limit = 30
 	}
-	path := fmt.Sprintf("/v2/actions?appNames=%s&limit=%d", url.QueryEscape(appName), limit)
+	path := fmt.Sprintf("/v2/actions?apps=%s&limit=%d", url.QueryEscape(appName), limit)
 	var resp struct {
 		Items []Action `json:"items"`
 	}
@@ -129,6 +130,7 @@ func (c *Client) ListActions(ctx context.Context, appName string, limit int) ([]
 	if err != nil {
 		return nil, err
 	}
+	log.Printf("[Composio] ListActions(%s): got %d raw actions", appName, len(resp.Items))
 	return resp.Items, nil
 }
 

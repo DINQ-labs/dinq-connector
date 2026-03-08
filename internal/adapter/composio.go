@@ -53,6 +53,12 @@ func NewDynamicComposioAdapter(ctx context.Context, client *composio.Client, pla
 	prefix := strings.ToUpper(appName) + "_"
 
 	for _, a := range actions {
+		// Filter: only keep actions belonging to this app
+		if !strings.EqualFold(a.AppName, appName) && !strings.HasPrefix(a.Name, prefix) {
+			log.Printf("[Composio] Skipping unrelated action %s (app=%s) for %s", a.Name, a.AppName, displayName)
+			continue
+		}
+
 		// "GMAIL_SEND_EMAIL" → "send_email"
 		localName := strings.ToLower(strings.TrimPrefix(a.Name, prefix))
 		if localName == "" || localName == strings.ToLower(a.Name) {
