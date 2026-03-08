@@ -21,7 +21,8 @@ case "${1:-deploy}" in
     echo "  docker pull $IMAGE && docker compose up -d"
     ;;
   up)
-    docker compose up -d
+    git pull
+    docker compose up -d --build
     ;;
   down)
     docker compose down

@@ -4,7 +4,6 @@ services:
     image: ghcr.io/dinq-labs/dinq-connector:latest
     ports:
       - "8091:8091"
-      - "8092:8092"
     env_file:
       - .env
     restart: unless-stopped
