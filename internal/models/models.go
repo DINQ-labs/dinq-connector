@@ -5,18 +5,18 @@ import "time"
 
 // ConnectedAccount represents a user's authenticated connection to a platform.
 type ConnectedAccount struct {
-	ID           string    `json:"id"`
-	UserID       string    `json:"user_id"`
-	Platform     string    `json:"platform"`      // "github", "google", "slack", "notion"
-	Status       string    `json:"status"`         // "initiated", "active", "expired", "failed"
-	StatusReason string    `json:"status_reason"`  // reason for current status
-	AccessToken  string    `json:"-"`              // never expose in JSON
-	RefreshToken string    `json:"-"`
-	TokenType    string    `json:"token_type"`
-	Scopes       string    `json:"scopes"`         // comma-separated
+	ID           string     `json:"id"`
+	UserID       string     `json:"user_id"`
+	Platform     string     `json:"platform"`      // "github", "google", "slack", "notion"
+	Status       string     `json:"status"`        // "initiated", "active", "expired", "failed"
+	StatusReason string     `json:"status_reason"` // reason for current status
+	AccessToken  string     `json:"-"`             // never expose in JSON
+	RefreshToken string     `json:"-"`
+	TokenType    string     `json:"token_type"`
+	Scopes       string     `json:"scopes"` // comma-separated
 	ExpiresAt    *time.Time `json:"expires_at"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 // IsActive returns true if the account can be used for tool execution.
@@ -56,10 +56,11 @@ type AuthConfig struct {
 
 // PendingAuth tracks an in-progress OAuth flow (before user completes authorization).
 type PendingAuth struct {
-	State       string    `json:"state"`        // OAuth state parameter (CSRF protection)
-	UserID      string    `json:"user_id"`
-	Platform    string    `json:"platform"`
-	CallbackURL string    `json:"callback_url"` // where to redirect after auth
-	CreatedAt   time.Time `json:"created_at"`
-	ExpiresAt   time.Time `json:"expires_at"`   // 10-minute TTL
+	State        string    `json:"state"` // OAuth state parameter (CSRF protection)
+	UserID       string    `json:"user_id"`
+	Platform     string    `json:"platform"`
+	CallbackURL  string    `json:"callback_url"`            // where to redirect after auth
+	CodeVerifier string    `json:"code_verifier,omitempty"` // PKCE only
+	CreatedAt    time.Time `json:"created_at"`
+	ExpiresAt    time.Time `json:"expires_at"` // 10-minute TTL
 }

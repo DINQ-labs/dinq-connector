@@ -70,6 +70,7 @@ func (s *Store) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_connected_accounts_user ON connected_accounts(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_connected_accounts_platform ON connected_accounts(user_id, platform)`,
+		`ALTER TABLE pending_auths ADD COLUMN IF NOT EXISTS code_verifier TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, q := range queries {
 		if _, err := s.db.Exec(q); err != nil {
@@ -143,12 +144,13 @@ func (s *Store) ListConnectedAccounts(ctx context.Context, userID string) ([]*mo
 // SavePendingAuth saves a pending OAuth flow.
 func (s *Store) SavePendingAuth(ctx context.Context, p *models.PendingAuth) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO pending_auths (state, user_id, platform, callback_url, created_at, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO pending_auths (state, user_id, platform, callback_url, code_verifier, created_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (state) DO UPDATE SET
 			user_id = EXCLUDED.user_id, platform = EXCLUDED.platform,
-			callback_url = EXCLUDED.callback_url, expires_at = EXCLUDED.expires_at
-	`, p.State, p.UserID, p.Platform, p.CallbackURL, p.CreatedAt, p.ExpiresAt)
+			callback_url = EXCLUDED.callback_url, code_verifier = EXCLUDED.code_verifier,
+			expires_at = EXCLUDED.expires_at
+	`, p.State, p.UserID, p.Platform, p.CallbackURL, p.CodeVerifier, p.CreatedAt, p.ExpiresAt)
 	return err
 }
 
@@ -156,9 +158,9 @@ func (s *Store) SavePendingAuth(ctx context.Context, p *models.PendingAuth) erro
 func (s *Store) GetPendingAuth(ctx context.Context, state string) (*models.PendingAuth, error) {
 	p := &models.PendingAuth{}
 	err := s.db.QueryRowContext(ctx, `
-		SELECT state, user_id, platform, callback_url, created_at, expires_at
+		SELECT state, user_id, platform, callback_url, code_verifier, created_at, expires_at
 		FROM pending_auths WHERE state = $1
-	`, state).Scan(&p.State, &p.UserID, &p.Platform, &p.CallbackURL, &p.CreatedAt, &p.ExpiresAt)
+	`, state).Scan(&p.State, &p.UserID, &p.Platform, &p.CallbackURL, &p.CodeVerifier, &p.CreatedAt, &p.ExpiresAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("not found")
 	}

@@ -3,6 +3,8 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -81,16 +83,36 @@ func (m *Manager) InitiateOAuth(ctx context.Context, userID, platform, callbackU
 		CreatedAt:   time.Now(),
 		ExpiresAt:   time.Now().Add(10 * time.Minute),
 	}
+
+	// Use space-separated scopes from OAuthConfig when available (required by Twitter);
+	// fall back to the comma-separated cfg.Scopes for backwards compat.
+	scopes := cfg.Scopes
+	if len(oauthCfg.Scopes) > 0 {
+		scopes = strings.Join(oauthCfg.Scopes, " ")
+	}
+
+	params := url.Values{
+		"response_type": {"code"},
+		"client_id":     {cfg.ClientID},
+		"redirect_uri":  {m.baseURL + "/auth/callback/" + platform},
+		"scope":         {scopes},
+		"state":         {state},
+	}
+
+	if oauthCfg.PKCE {
+		verifier, err := generateCodeVerifier()
+		if err != nil {
+			return "", fmt.Errorf("generate pkce: %w", err)
+		}
+		pending.CodeVerifier = verifier
+		params.Set("code_challenge", codeChallenge(verifier))
+		params.Set("code_challenge_method", "S256")
+	}
+
 	if err := m.store.SavePendingAuth(ctx, pending); err != nil {
 		return "", fmt.Errorf("save pending auth: %w", err)
 	}
 
-	params := url.Values{
-		"client_id":    {cfg.ClientID},
-		"redirect_uri": {m.baseURL + "/auth/callback/" + platform},
-		"scope":        {cfg.Scopes},
-		"state":        {state},
-	}
 	return oauthCfg.AuthorizeURL + "?" + params.Encode(), nil
 }
 
@@ -231,7 +253,7 @@ func (m *Manager) HandleCallback(ctx context.Context, platform, code, state stri
 	cfg := m.configs[platform]
 	oauthCfg := a.OAuthConfig()
 
-	tokenResp, err := exchangeCode(ctx, oauthCfg.TokenURL, cfg.ClientID, cfg.ClientSecret, code, m.baseURL+"/auth/callback/"+platform)
+	tokenResp, err := exchangeCode(ctx, oauthCfg.TokenURL, cfg.ClientID, cfg.ClientSecret, code, m.baseURL+"/auth/callback/"+platform, pending.CodeVerifier)
 	if err != nil {
 		return nil, "", fmt.Errorf("token exchange: %w", err)
 	}
@@ -328,13 +350,16 @@ type tokenResponse struct {
 	ExpiresIn    int    `json:"expires_in"`
 }
 
-func exchangeCode(ctx context.Context, tokenURL, clientID, clientSecret, code, redirectURI string) (*tokenResponse, error) {
+func exchangeCode(ctx context.Context, tokenURL, clientID, clientSecret, code, redirectURI, codeVerifier string) (*tokenResponse, error) {
 	data := url.Values{
 		"grant_type":    {"authorization_code"},
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
 		"code":          {code},
 		"redirect_uri":  {redirectURI},
+	}
+	if codeVerifier != "" {
+		data.Set("code_verifier", codeVerifier)
 	}
 	return postToken(ctx, tokenURL, data)
 }
@@ -379,4 +404,19 @@ func randomState() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// generateCodeVerifier generates a PKCE code_verifier (43-128 url-safe chars).
+func generateCodeVerifier() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// codeChallenge computes S256 code_challenge from verifier.
+func codeChallenge(verifier string) string {
+	h := sha256.Sum256([]byte(verifier))
+	return base64.RawURLEncoding.EncodeToString(h[:])
 }

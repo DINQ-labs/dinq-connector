@@ -26,6 +26,7 @@ type OAuthConfig struct {
 	AuthorizeURL string   // e.g. "https://github.com/login/oauth/authorize"
 	TokenURL     string   // e.g. "https://github.com/login/oauth/access_token"
 	Scopes       []string // e.g. ["repo", "read:user"]
+	PKCE         bool     // requires PKCE (Twitter OAuth 2.0)
 	// ClientID and ClientSecret come from env/DB at runtime, not hardcoded here.
 }
 

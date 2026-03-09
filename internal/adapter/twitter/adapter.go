@@ -1,82 +1,145 @@
-// Package twitter provides a Composio-backed Twitter adapter.
-// Free tier: post tweets (1,500/month), delete tweets, get own profile.
+// Package twitter implements the PlatformAdapter for Twitter/X using direct OAuth 2.0.
 package twitter
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/DINQ-labs/dinq-connector/internal/adapter"
-	"github.com/DINQ-labs/dinq-connector/internal/composio"
 )
 
-// Composio action IDs for Twitter.
-// Verify these in the Composio dashboard: https://app.composio.dev
-const (
-	ActionCreateTweet = "TWITTER_CREATION_OF_A_POST"
-	ActionDeleteTweet = "TWITTER_POST_DELETE_BY_POST_ID"
-	ActionGetMe       = "TWITTER_USER_LOOKUP_ME"
-)
+const apiBase = "https://api.twitter.com"
 
-// New creates a Twitter adapter backed by Composio.
-func New(client *composio.Client, authConfigID, integrationID string) *adapter.ComposioAdapter {
-	return adapter.NewComposioAdapter(client, adapter.ComposioAdapterConfig{
-		Platform:      "twitter",
-		DisplayName_:  "Twitter / X",
-		AuthConfigID:  authConfigID,
-		IntegrationID: integrationID,
-		AppName:       "twitter",
-		Tools_:        tools(),
-	})
+// Adapter implements adapter.PlatformAdapter for Twitter/X via direct OAuth 2.0.
+type Adapter struct{}
+
+func New() *Adapter { return &Adapter{} }
+
+func (a *Adapter) Name() string                   { return "twitter" }
+func (a *Adapter) DisplayName() string            { return "Twitter / X" }
+func (a *Adapter) AuthScheme() adapter.AuthScheme { return adapter.AuthOAuth2 }
+
+func (a *Adapter) OAuthConfig() *adapter.OAuthConfig {
+	return &adapter.OAuthConfig{
+		AuthorizeURL: "https://twitter.com/i/oauth2/authorize",
+		TokenURL:     "https://api.twitter.com/2/oauth2/token",
+		Scopes:       []string{"tweet.read", "tweet.write", "users.read", "offline.access"},
+		PKCE:         true,
+	}
 }
 
-func tools() []adapter.ComposioToolMapping {
-	return []adapter.ComposioToolMapping{
-		{
-			LocalName:      "create_tweet",
-			ComposioAction: ActionCreateTweet,
-			Description:    "Post a new tweet on Twitter/X. Free tier limit: 1,500 tweets per month.",
-			InputSchema: mcp.ToolInputSchema{
-				Type: "object",
-				Properties: map[string]any{
-					"text": map[string]any{
-						"type":        "string",
-						"description": "The tweet text content (max 280 characters).",
-					},
-					"reply_to": map[string]any{
-						"type":        "string",
-						"description": "Tweet ID to reply to (optional).",
-					},
-					"quote_tweet_id": map[string]any{
-						"type":        "string",
-						"description": "Tweet ID to quote (optional).",
-					},
-				},
-				Required: []string{"text"},
-			},
-		},
-		{
-			LocalName:      "delete_tweet",
-			ComposioAction: ActionDeleteTweet,
-			Description:    "Delete a tweet by its ID.",
-			InputSchema: mcp.ToolInputSchema{
-				Type: "object",
-				Properties: map[string]any{
-					"tweet_id": map[string]any{
-						"type":        "string",
-						"description": "The ID of the tweet to delete.",
-					},
-				},
-				Required: []string{"tweet_id"},
-			},
-		},
-		{
-			LocalName:      "get_me",
-			ComposioAction: ActionGetMe,
-			Description:    "Get the authenticated Twitter user's profile information.",
-			InputSchema: mcp.ToolInputSchema{
-				Type:       "object",
-				Properties: map[string]any{},
-			},
-		},
+func (a *Adapter) Tools() []mcp.Tool {
+	return []mcp.Tool{
+		mcp.NewTool("twitter_create_tweet",
+			mcp.WithDescription("Post a new tweet. Free tier limit: 500 tweets/month per user."),
+			mcp.WithString("text", mcp.Required(), mcp.Description("Tweet text (max 280 characters)")),
+		),
+		mcp.NewTool("twitter_delete_tweet",
+			mcp.WithDescription("Delete a tweet by its ID."),
+			mcp.WithString("tweet_id", mcp.Required(), mcp.Description("The tweet ID to delete")),
+		),
+		mcp.NewTool("twitter_get_me",
+			mcp.WithDescription("Get the authenticated user's Twitter profile (id, name, username, description)."),
+		),
 	}
+}
+
+func (a *Adapter) Execute(ctx context.Context, toolName string, args map[string]any, token, _ string) (*mcp.CallToolResult, error) {
+	switch toolName {
+	case "create_tweet":
+		return a.createTweet(ctx, args, token)
+	case "delete_tweet":
+		return a.deleteTweet(ctx, args, token)
+	case "get_me":
+		return a.getMe(ctx, token)
+	default:
+		return mcp.NewToolResultError(fmt.Sprintf("unknown tool: %s", toolName)), nil
+	}
+}
+
+func (a *Adapter) createTweet(ctx context.Context, args map[string]any, token string) (*mcp.CallToolResult, error) {
+	text, _ := args["text"].(string)
+	if text == "" {
+		return mcp.NewToolResultError("text is required"), nil
+	}
+	body, _ := json.Marshal(map[string]string{"text": text})
+	data, err := twitterPost(ctx, "/2/tweets", body, token)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (a *Adapter) deleteTweet(ctx context.Context, args map[string]any, token string) (*mcp.CallToolResult, error) {
+	tweetID, _ := args["tweet_id"].(string)
+	if tweetID == "" {
+		return mcp.NewToolResultError("tweet_id is required"), nil
+	}
+	data, err := twitterDelete(ctx, "/2/tweets/"+tweetID, token)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (a *Adapter) getMe(ctx context.Context, token string) (*mcp.CallToolResult, error) {
+	data, err := twitterGet(ctx, "/2/users/me?user.fields=id,name,username,description,profile_image_url,public_metrics", token)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func twitterGet(ctx context.Context, path, token string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", apiBase+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	return doRequest(req)
+}
+
+func twitterPost(ctx context.Context, path string, body []byte, token string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "POST", apiBase+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	return doRequest(req)
+}
+
+func twitterDelete(ctx context.Context, path, token string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "DELETE", apiBase+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	return doRequest(req)
+}
+
+func doRequest(req *http.Request) ([]byte, error) {
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("Twitter API %d: %s", resp.StatusCode, truncate(string(data), 300))
+	}
+	return data, nil
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }

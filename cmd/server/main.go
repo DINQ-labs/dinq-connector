@@ -60,11 +60,7 @@ func main() {
 			return ""
 		}
 
-		// Twitter: static adapter (free tier — limited tools)
-		if id := os.Getenv("COMPOSIO_TWITTER_AUTH_CONFIG_ID"); id != "" {
-			registry.Register(twitter.New(cc, id, integrationID("twitter")))
-			log.Println("[Registry] Twitter registered (static, free tier)")
-		}
+		// (Twitter is now direct OAuth 2.0; see registration below)
 
 		// All other platforms: dynamic — tools fetched from Composio API at startup
 		dynamicPlatforms := []struct {
@@ -99,6 +95,12 @@ func main() {
 		}
 	}
 
+	// Twitter: direct OAuth 2.0 (PKCE)
+	if os.Getenv("TWITTER_CLIENT_ID") != "" {
+		registry.Register(twitter.New())
+		log.Println("[Registry] Twitter registered (direct OAuth 2.0)")
+	}
+
 	log.Printf("[Registry] %d adapters registered", len(registry.List()))
 
 	// --- Auth Manager ---
@@ -108,6 +110,11 @@ func main() {
 	if id := os.Getenv("GITHUB_CLIENT_ID"); id != "" {
 		authMgr.SetConfig("github", id, os.Getenv("GITHUB_CLIENT_SECRET"), "repo,read:user,read:org")
 		log.Println("[Auth] GitHub OAuth configured")
+	}
+
+	if id := os.Getenv("TWITTER_CLIENT_ID"); id != "" {
+		authMgr.SetConfig("twitter", id, os.Getenv("TWITTER_CLIENT_SECRET"), "tweet.read,tweet.write,users.read,offline.access")
+		log.Println("[Auth] Twitter OAuth configured")
 	}
 
 	// --- HTTP API + MCP on same port ---
