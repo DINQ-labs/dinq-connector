@@ -95,11 +95,11 @@ func main() {
 		}
 	}
 
-	// Twitter: direct OAuth 2.0 (PKCE)
-	if os.Getenv("TWITTER_CLIENT_ID") != "" {
-		registry.Register(twitter.New())
-		log.Println("[Registry] Twitter registered (direct OAuth 2.0)")
-	}
+	// Twitter: disabled — API 503 service unavailable (rate limits / policy)
+	// if os.Getenv("TWITTER_CLIENT_ID") != "" {
+	// 	registry.Register(twitter.New())
+	// 	log.Println("[Registry] Twitter registered (direct OAuth 2.0)")
+	// }
 
 	log.Printf("[Registry] %d adapters registered", len(registry.List()))
 
