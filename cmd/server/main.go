@@ -14,7 +14,6 @@ import (
 
 	"github.com/DINQ-labs/dinq-connector/internal/adapter"
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/github"
-	"github.com/DINQ-labs/dinq-connector/internal/adapter/twitter"
 	"github.com/DINQ-labs/dinq-connector/internal/auth"
 	"github.com/DINQ-labs/dinq-connector/internal/composio"
 	"github.com/DINQ-labs/dinq-connector/internal/db"
