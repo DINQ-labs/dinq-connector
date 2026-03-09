@@ -31,6 +31,7 @@ func (a *Adapter) OAuthConfig() *adapter.OAuthConfig {
 		TokenURL:     "https://api.twitter.com/2/oauth2/token",
 		Scopes:       []string{"tweet.read", "tweet.write", "users.read", "offline.access"},
 		PKCE:         true,
+		BasicAuth:    true, // Twitter token endpoint requires Basic Auth header
 	}
 }
 

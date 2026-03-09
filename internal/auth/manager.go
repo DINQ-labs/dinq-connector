@@ -253,7 +253,7 @@ func (m *Manager) HandleCallback(ctx context.Context, platform, code, state stri
 	cfg := m.configs[platform]
 	oauthCfg := a.OAuthConfig()
 
-	tokenResp, err := exchangeCode(ctx, oauthCfg.TokenURL, cfg.ClientID, cfg.ClientSecret, code, m.baseURL+"/auth/callback/"+platform, pending.CodeVerifier)
+	tokenResp, err := exchangeCode(ctx, oauthCfg.TokenURL, cfg.ClientID, cfg.ClientSecret, code, m.baseURL+"/auth/callback/"+platform, pending.CodeVerifier, oauthCfg.BasicAuth)
 	if err != nil {
 		return nil, "", fmt.Errorf("token exchange: %w", err)
 	}
@@ -310,7 +310,7 @@ func (m *Manager) GetActiveToken(ctx context.Context, userID, platform string) (
 		return "", fmt.Errorf("cannot refresh: no OAuth config for %s", platform)
 	}
 
-	tokenResp, err := refreshToken(ctx, oauthCfg.TokenURL, cfg.ClientID, cfg.ClientSecret, account.RefreshToken)
+	tokenResp, err := refreshToken(ctx, oauthCfg.TokenURL, cfg.ClientID, cfg.ClientSecret, account.RefreshToken, oauthCfg.BasicAuth)
 	if err != nil {
 		account.Status = models.StatusExpired
 		account.StatusReason = "refresh failed: " + err.Error()
@@ -350,37 +350,44 @@ type tokenResponse struct {
 	ExpiresIn    int    `json:"expires_in"`
 }
 
-func exchangeCode(ctx context.Context, tokenURL, clientID, clientSecret, code, redirectURI, codeVerifier string) (*tokenResponse, error) {
+func exchangeCode(ctx context.Context, tokenURL, clientID, clientSecret, code, redirectURI, codeVerifier string, basicAuth bool) (*tokenResponse, error) {
 	data := url.Values{
-		"grant_type":    {"authorization_code"},
-		"client_id":     {clientID},
-		"client_secret": {clientSecret},
-		"code":          {code},
-		"redirect_uri":  {redirectURI},
+		"grant_type":   {"authorization_code"},
+		"client_id":    {clientID},
+		"code":         {code},
+		"redirect_uri": {redirectURI},
+	}
+	if !basicAuth {
+		data.Set("client_secret", clientSecret)
 	}
 	if codeVerifier != "" {
 		data.Set("code_verifier", codeVerifier)
 	}
-	return postToken(ctx, tokenURL, data)
+	return postToken(ctx, tokenURL, clientID, clientSecret, basicAuth, data)
 }
 
-func refreshToken(ctx context.Context, tokenURL, clientID, clientSecret, refreshTok string) (*tokenResponse, error) {
+func refreshToken(ctx context.Context, tokenURL, clientID, clientSecret, refreshTok string, basicAuth bool) (*tokenResponse, error) {
 	data := url.Values{
 		"grant_type":    {"refresh_token"},
 		"client_id":     {clientID},
-		"client_secret": {clientSecret},
 		"refresh_token": {refreshTok},
 	}
-	return postToken(ctx, tokenURL, data)
+	if !basicAuth {
+		data.Set("client_secret", clientSecret)
+	}
+	return postToken(ctx, tokenURL, clientID, clientSecret, basicAuth, data)
 }
 
-func postToken(ctx context.Context, tokenURL string, data url.Values) (*tokenResponse, error) {
+func postToken(ctx context.Context, tokenURL, clientID, clientSecret string, basicAuth bool, data url.Values) (*tokenResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, "POST", tokenURL, strings.NewReader(data.Encode()))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
+	if basicAuth {
+		req.SetBasicAuth(clientID, clientSecret)
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
