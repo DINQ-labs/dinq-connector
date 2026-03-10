@@ -1,0 +1,19 @@
+name: Deploy to Test Server
+
+on:
+  push:
+    branches: [dev]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy connector to test server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.TEST_SERVER_HOST }}
+          username: root
+          key: ${{ secrets.TEST_SERVER_SSH_KEY }}
+          script: |
+            cd /home/server/dinq-connector
+            ./deploy.sh up
