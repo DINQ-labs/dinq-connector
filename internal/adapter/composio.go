@@ -12,6 +12,16 @@ import (
 	"github.com/DINQ-labs/dinq-connector/internal/composio"
 )
 
+// ExtraTool is an additional tool attached to a ComposioAdapter at runtime.
+// Execute is a closure that calls an external API (e.g. Apify) directly,
+// independently of the user's OAuth token for this platform.
+type ExtraTool struct {
+	LocalName   string
+	Description string
+	Schema      mcp.ToolInputSchema
+	Execute     func(ctx context.Context, args map[string]any) (*mcp.CallToolResult, error)
+}
+
 // ComposioToolMapping maps a local tool name to a Composio action.
 type ComposioToolMapping struct {
 	LocalName      string // e.g. "create_tweet" (without platform prefix)
@@ -29,6 +39,7 @@ type ComposioAdapterConfig struct {
 	IntegrationID string                // Composio integration UUID (from /v1/integrations)
 	AppName       string                // Composio app name, e.g. "twitter", "linkedin"
 	Tools_        []ComposioToolMapping // Tool definitions
+	ExtraTools    []ExtraTool           // Non-Composio tools (e.g. Apify search)
 }
 
 // ComposioAdapter implements PlatformAdapter using Composio as the backend.
@@ -130,11 +141,17 @@ func (a *ComposioAdapter) OAuthConfig() *OAuthConfig { return nil }
 func (a *ComposioAdapter) AuthConfigID() string             { return a.config.AuthConfigID }
 func (a *ComposioAdapter) IntegrationID() string            { return a.config.IntegrationID }
 func (a *ComposioAdapter) ComposioClient() *composio.Client { return a.client }
-func (a *ComposioAdapter) ComposioAppName() string          { return a.config.AppName }
+func (a *ComposioAdapter) ComposioAppName() string { return a.config.AppName }
+
+// AddExtraTool attaches an additional non-Composio tool to this adapter.
+// Call this after creation, before registering in the registry.
+func (a *ComposioAdapter) AddExtraTool(t ExtraTool) {
+	a.config.ExtraTools = append(a.config.ExtraTools, t)
+}
 
 // Tools returns MCP tool definitions prefixed with the platform name.
 func (a *ComposioAdapter) Tools() []mcp.Tool {
-	tools := make([]mcp.Tool, 0, len(a.config.Tools_))
+	tools := make([]mcp.Tool, 0, len(a.config.Tools_)+len(a.config.ExtraTools))
 	for _, t := range a.config.Tools_ {
 		tools = append(tools, mcp.Tool{
 			Name:        fmt.Sprintf("%s_%s", a.config.Platform, t.LocalName),
@@ -142,12 +159,26 @@ func (a *ComposioAdapter) Tools() []mcp.Tool {
 			InputSchema: t.InputSchema,
 		})
 	}
+	for _, t := range a.config.ExtraTools {
+		tools = append(tools, mcp.Tool{
+			Name:        fmt.Sprintf("%s_%s", a.config.Platform, t.LocalName),
+			Description: t.Description,
+			InputSchema: t.Schema,
+		})
+	}
 	return tools
 }
 
-// Execute runs a tool via the Composio API.
+// Execute runs a tool via the Composio API, or an extra tool directly.
 // accessToken is the Composio connectedAccountId; userID is the entity ID required by v3.
 func (a *ComposioAdapter) Execute(ctx context.Context, toolName string, args map[string]any, accessToken, userID string) (*mcp.CallToolResult, error) {
+	// Extra tools (e.g. Apify search) bypass Composio entirely.
+	for _, t := range a.config.ExtraTools {
+		if t.LocalName == toolName {
+			return t.Execute(ctx, args)
+		}
+	}
+
 	// Find the Composio action ID and version for this tool
 	var actionID string
 	for _, t := range a.config.Tools_ {
