@@ -7,13 +7,18 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
 
+	"github.com/mark3labs/mcp-go/mcp"
+
 	"github.com/DINQ-labs/dinq-connector/internal/adapter"
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/github"
+	"github.com/DINQ-labs/dinq-connector/internal/apify"
 	"github.com/DINQ-labs/dinq-connector/internal/auth"
 	"github.com/DINQ-labs/dinq-connector/internal/composio"
 	"github.com/DINQ-labs/dinq-connector/internal/db"
@@ -100,6 +105,13 @@ func main() {
 	// 	log.Println("[Registry] Twitter registered (direct OAuth 2.0)")
 	// }
 
+	// Attach Apify post-search tools to LinkedIn and Twitter adapters.
+	// These tools appear under connector_discover_tools(platform="linkedin/twitter").
+	if apifyToken := os.Getenv("APIFY_API_KEY"); apifyToken != "" {
+		apifyClient := apify.NewClient(apifyToken)
+		attachApifySearchTools(registry, apifyClient)
+	}
+
 	log.Printf("[Registry] %d adapters registered", len(registry.List()))
 
 	// --- Auth Manager ---
@@ -130,6 +142,75 @@ func main() {
 	log.Printf("[Server] Starting on %s (HTTP API + MCP at /mcp)", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatalf("Server error: %v", err)
+	}
+}
+
+// attachApifySearchTools adds Apify-backed search tools to the LinkedIn and Twitter adapters.
+func attachApifySearchTools(registry *adapter.Registry, client *apify.Client) {
+	if li := registry.Get("linkedin"); li != nil {
+		if ca, ok := li.(*adapter.ComposioAdapter); ok {
+			ca.AddExtraTool(adapter.ExtraTool{
+				LocalName:   "search_posts",
+				Description: "Search LinkedIn posts by keywords. Returns matching posts with author, content, likes, and URL.",
+				Schema: mcp.ToolInputSchema{
+					Type: "object",
+					Properties: map[string]any{
+						"keywords": map[string]any{"type": "string", "description": "Search keywords or phrase"},
+						"limit":    map[string]any{"type": "integer", "description": "Max results to return (default 10, max 50)"},
+					},
+					Required: []string{"keywords"},
+				},
+				Execute: func(ctx context.Context, args map[string]any) (*mcp.CallToolResult, error) {
+					input := map[string]any{"keywords": args["keywords"]}
+					if limit, ok := args["limit"]; ok {
+						input["count"] = limit
+					} else {
+						input["count"] = 10
+					}
+					items, err := client.RunActor(ctx, "harvestapi~linkedin-post-search", input)
+					if err != nil {
+						return mcp.NewToolResultError("LinkedIn search error: " + err.Error()), nil
+					}
+					data, _ := json.Marshal(items)
+					return mcp.NewToolResultText(string(data)), nil
+				},
+			})
+			log.Println("[Registry] LinkedIn: attached Apify post search tool")
+		}
+	}
+
+	if tw := registry.Get("twitter"); tw != nil {
+		if ca, ok := tw.(*adapter.ComposioAdapter); ok {
+			ca.AddExtraTool(adapter.ExtraTool{
+				LocalName:   "search_posts",
+				Description: "Search Twitter/X posts by keywords or hashtags. Returns matching tweets with author, content, likes, retweets, and URL.",
+				Schema: mcp.ToolInputSchema{
+					Type: "object",
+					Properties: map[string]any{
+						"query": map[string]any{"type": "string", "description": "Search query, keywords, or hashtags"},
+						"limit": map[string]any{"type": "integer", "description": "Max results to return (default 10, max 100)"},
+					},
+					Required: []string{"query"},
+				},
+				Execute: func(ctx context.Context, args map[string]any) (*mcp.CallToolResult, error) {
+					limit := 10
+					if l, ok := args["limit"].(float64); ok {
+						limit = int(l)
+					}
+					input := map[string]any{
+						"searchTerms": []string{fmt.Sprintf("%v", args["query"])},
+						"maxItems":    limit,
+					}
+					items, err := client.RunActor(ctx, "scraper_one~x-posts-search", input)
+					if err != nil {
+						return mcp.NewToolResultError("Twitter search error: " + err.Error()), nil
+					}
+					data, _ := json.Marshal(items)
+					return mcp.NewToolResultText(string(data)), nil
+				},
+			})
+			log.Println("[Registry] Twitter: attached Apify post search tool")
+		}
 	}
 }
 
