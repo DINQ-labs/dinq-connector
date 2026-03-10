@@ -116,7 +116,7 @@ func (m *Manager) InitiateOAuth(ctx context.Context, userID, platform, callbackU
 	return oauthCfg.AuthorizeURL + "?" + params.Encode(), nil
 }
 
-// initiateComposioAuth delegates the OAuth flow to Composio.
+// initiateComposioAuth delegates the OAuth flow to Composio via the v3 link API.
 func (m *Manager) initiateComposioAuth(ctx context.Context, a adapter.PlatformAdapter, userID, callbackURL string) (string, error) {
 	cap, ok := a.(adapter.ComposioAuthProvider)
 	if !ok {
@@ -141,13 +141,13 @@ func (m *Manager) initiateComposioAuth(ctx context.Context, a adapter.PlatformAd
 		return "", fmt.Errorf("save pending auth: %w", err)
 	}
 
-	// Composio will redirect user here after OAuth completes.
+	// Composio preserves custom query params and appends status + connected_account_id.
 	composioCallback := m.baseURL + "/auth/composio-callback?state=" + state
 
-	resp, err := cap.ComposioClient().InitiateConnection(ctx, composio.InitiateConnectionRequest{
-		IntegrationID: cap.IntegrationID(),
-		EntityID:      userID,
-		RedirectURI:   composioCallback,
+	resp, err := cap.ComposioClient().InitiateLink(ctx, composio.InitiateLinkRequest{
+		AuthConfigID: cap.AuthConfigID(),
+		UserID:       userID,
+		CallbackURL:  composioCallback,
 	})
 	if err != nil {
 		return "", fmt.Errorf("composio initiate: %w", err)

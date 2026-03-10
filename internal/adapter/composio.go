@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -22,24 +23,23 @@ type ExtraTool struct {
 	Execute     func(ctx context.Context, args map[string]any) (*mcp.CallToolResult, error)
 }
 
-// ComposioToolMapping maps a local tool name to a Composio action.
+// ComposioToolMapping maps a local tool name to a Composio tool slug + version.
 type ComposioToolMapping struct {
-	LocalName      string // e.g. "create_tweet" (without platform prefix)
-	ComposioAction string // e.g. "TWITTER_CREATION_OF_A_TWEET"
-	Version        string // e.g. "20260307_00" — used when executing
-	Description    string
-	InputSchema    mcp.ToolInputSchema
+	LocalName   string // e.g. "send_message" (without platform prefix)
+	Slug        string // e.g. "SLACK_SEND_MESSAGE"
+	Version     string // e.g. "20260309_00" — latest at discovery time
+	Description string
+	InputSchema mcp.ToolInputSchema
 }
 
 // ComposioAdapterConfig configures a Composio-backed platform adapter.
 type ComposioAdapterConfig struct {
-	Platform      string                // "twitter", "linkedin"
-	DisplayName_  string                // "Twitter", "LinkedIn"
-	AuthConfigID  string                // Composio auth config ID (from dashboard, ac_xxx)
-	IntegrationID string                // Composio integration UUID (from /v1/integrations)
-	AppName       string                // Composio app name, e.g. "twitter", "linkedin"
-	Tools_        []ComposioToolMapping // Tool definitions
-	ExtraTools    []ExtraTool           // Non-Composio tools (e.g. Apify search)
+	Platform     string                // "twitter", "linkedin"
+	DisplayName_ string                // "Twitter", "LinkedIn"
+	AuthConfigID string                // Composio auth config ID (from dashboard, ac_xxx)
+	AppName      string                // Composio app name, e.g. "twitter", "linkedin"
+	Tools_       []ComposioToolMapping // Tool definitions
+	ExtraTools   []ExtraTool           // Non-Composio tools (e.g. Apify search)
 }
 
 // ComposioAdapter implements PlatformAdapter using Composio as the backend.
@@ -54,33 +54,71 @@ func NewComposioAdapter(client *composio.Client, config ComposioAdapterConfig) *
 	return &ComposioAdapter{config: config, client: client}
 }
 
-// NewDynamicComposioAdapter creates an adapter by fetching tool definitions from Composio API at startup.
-// No need to hardcode action IDs — tools are discovered automatically.
-func NewDynamicComposioAdapter(ctx context.Context, client *composio.Client, platform, displayName, authConfigID, integrationID, appName string) (*ComposioAdapter, error) {
-	actions, err := client.ListActions(ctx, appName, 30)
+// NewDynamicComposioAdapter discovers tools via the v3 API at startup.
+// Uses tags=important for platforms with curated tools, falls back to all tools otherwise.
+// Each tool is fetched individually to resolve the latest version.
+func NewDynamicComposioAdapter(ctx context.Context, client *composio.Client, platform, displayName, authConfigID, appName string, excludeTools ...string) (*ComposioAdapter, error) {
+	listed, err := client.ListToolsV3(ctx, appName, true)
 	if err != nil {
-		return nil, fmt.Errorf("fetch %s actions: %w", appName, err)
+		return nil, fmt.Errorf("list %s tools: %w", appName, err)
+	}
+	if len(listed) < 3 {
+		all, err2 := client.ListToolsV3(ctx, appName, false)
+		if err2 == nil && len(all) > len(listed) {
+			listed = all
+		}
 	}
 
-	tools := make([]ComposioToolMapping, 0, len(actions))
 	prefix := strings.ToUpper(appName) + "_"
 
-	for _, a := range actions {
-		// Filter: only keep actions belonging to this app
-		if !strings.EqualFold(a.AppName, appName) && !strings.HasPrefix(a.Name, prefix) {
-			log.Printf("[Composio] Skipping unrelated action %s (app=%s) for %s", a.Name, a.AppName, displayName)
+	// Fetch each tool individually (parallel) to get latest version + full schema.
+	type result struct {
+		idx  int
+		tool *composio.ToolV3
+		err  error
+	}
+	ch := make(chan result, len(listed))
+	var wg sync.WaitGroup
+	for i, t := range listed {
+		wg.Add(1)
+		go func(idx int, slug string) {
+			defer wg.Done()
+			full, fetchErr := client.GetToolV3(ctx, slug)
+			ch <- result{idx: idx, tool: full, err: fetchErr}
+		}(i, t.Slug)
+	}
+	go func() { wg.Wait(); close(ch) }()
+
+	excluded := make(map[string]struct{}, len(excludeTools))
+	for _, e := range excludeTools {
+		excluded[strings.ToLower(e)] = struct{}{}
+	}
+
+	fetched := make([]*composio.ToolV3, len(listed))
+	for r := range ch {
+		if r.err != nil {
+			log.Printf("[Composio] Failed to fetch %s: %v", listed[r.idx].Slug, r.err)
+			continue
+		}
+		fetched[r.idx] = r.tool
+	}
+
+	tools := make([]ComposioToolMapping, 0, len(fetched))
+	for i, t := range fetched {
+		if t == nil {
+			t = &listed[i]
+		}
+
+		localName := strings.ToLower(strings.TrimPrefix(t.Slug, prefix))
+		if localName == "" || localName == strings.ToLower(t.Slug) {
+			localName = strings.ToLower(t.Slug)
+		}
+
+		if _, skip := excluded[localName]; skip {
 			continue
 		}
 
-		// "GMAIL_SEND_EMAIL" → "send_email"
-		localName := strings.ToLower(strings.TrimPrefix(a.Name, prefix))
-		if localName == "" || localName == strings.ToLower(a.Name) {
-			// Prefix didn't match, use full name lowercased
-			localName = strings.ToLower(a.Name)
-		}
-
-		// Remove user_id from properties (we inject it ourselves)
-		props := a.Parameters.Properties
+		props := t.InputParameters.Properties
 		if props == nil {
 			props = map[string]any{}
 		}
@@ -92,22 +130,22 @@ func NewDynamicComposioAdapter(ctx context.Context, client *composio.Client, pla
 			}
 			filtered[k] = v
 		}
-		for _, r := range a.Parameters.Required {
+		for _, r := range t.InputParameters.Required {
 			if r != "user_id" {
 				required = append(required, r)
 			}
 		}
 
-		desc := a.Description
+		desc := t.Description
 		if desc == "" {
-			desc = a.DisplayName
+			desc = t.Name
 		}
 
 		tools = append(tools, ComposioToolMapping{
-			LocalName:      localName,
-			ComposioAction: a.Name,
-			Version:        a.Version,
-			Description:    desc,
+			LocalName:   localName,
+			Slug:        t.Slug,
+			Version:     t.LatestVersion(),
+			Description: desc,
 			InputSchema: mcp.ToolInputSchema{
 				Type:       "object",
 				Properties: filtered,
@@ -117,18 +155,17 @@ func NewDynamicComposioAdapter(ctx context.Context, client *composio.Client, pla
 	}
 
 	if len(tools) == 0 {
-		return nil, fmt.Errorf("no actions found for %s on Composio", appName)
+		return nil, fmt.Errorf("no tools found for %s on Composio", appName)
 	}
 
-	log.Printf("[Composio] Discovered %d actions for %s", len(tools), displayName)
+	log.Printf("[Composio] Discovered %d tools for %s (latest versions)", len(tools), displayName)
 
 	return NewComposioAdapter(client, ComposioAdapterConfig{
-		Platform:      platform,
-		DisplayName_:  displayName,
-		AuthConfigID:  authConfigID,
-		IntegrationID: integrationID,
-		AppName:       appName,
-		Tools_:        tools,
+		Platform:     platform,
+		DisplayName_: displayName,
+		AuthConfigID: authConfigID,
+		AppName:      appName,
+		Tools_:       tools,
 	}), nil
 }
 
@@ -139,12 +176,10 @@ func (a *ComposioAdapter) OAuthConfig() *OAuthConfig { return nil }
 
 // ComposioAuthProvider methods (used by auth manager)
 func (a *ComposioAdapter) AuthConfigID() string             { return a.config.AuthConfigID }
-func (a *ComposioAdapter) IntegrationID() string            { return a.config.IntegrationID }
 func (a *ComposioAdapter) ComposioClient() *composio.Client { return a.client }
-func (a *ComposioAdapter) ComposioAppName() string { return a.config.AppName }
+func (a *ComposioAdapter) ComposioAppName() string          { return a.config.AppName }
 
 // AddExtraTool attaches an additional non-Composio tool to this adapter.
-// Call this after creation, before registering in the registry.
 func (a *ComposioAdapter) AddExtraTool(t ExtraTool) {
 	a.config.ExtraTools = append(a.config.ExtraTools, t)
 }
@@ -169,25 +204,22 @@ func (a *ComposioAdapter) Tools() []mcp.Tool {
 	return tools
 }
 
-// Execute runs a tool via the Composio API, or an extra tool directly.
-// accessToken is the Composio connectedAccountId; userID is the entity ID required by v3.
+// Execute runs a tool via the Composio v3 API, or an extra tool directly.
 func (a *ComposioAdapter) Execute(ctx context.Context, toolName string, args map[string]any, accessToken, userID string) (*mcp.CallToolResult, error) {
-	// Extra tools (e.g. Apify search) bypass Composio entirely.
 	for _, t := range a.config.ExtraTools {
 		if t.LocalName == toolName {
 			return t.Execute(ctx, args)
 		}
 	}
 
-	// Find the Composio action ID and version for this tool
-	var actionID string
-	for _, t := range a.config.Tools_ {
-		if t.LocalName == toolName {
-			actionID = t.ComposioAction
+	var mapping *ComposioToolMapping
+	for i := range a.config.Tools_ {
+		if a.config.Tools_[i].LocalName == toolName {
+			mapping = &a.config.Tools_[i]
 			break
 		}
 	}
-	if actionID == "" {
+	if mapping == nil {
 		return mcp.NewToolResultError(fmt.Sprintf("unknown tool: %s", toolName)), nil
 	}
 
@@ -195,10 +227,10 @@ func (a *ComposioAdapter) Execute(ctx context.Context, toolName string, args map
 		args = map[string]any{}
 	}
 
-	resp, err := a.client.ExecuteTool(ctx, actionID, composio.ExecuteToolRequest{
+	resp, err := a.client.ExecuteTool(ctx, mapping.Slug, composio.ExecuteToolRequest{
 		UserID:    userID,
 		Arguments: args,
-		Version:   "20260307_00", // pin to a known-good action version; avoids stale LinkedIn API version (426)
+		Version:   mapping.Version,
 	})
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Composio error: %s", err)), nil
@@ -211,9 +243,55 @@ func (a *ComposioAdapter) Execute(ctx context.Context, toolName string, args map
 		return mcp.NewToolResultError(errMsg), nil
 	}
 
-	data, err := json.Marshal(resp.Data)
+	cleaned := stripBulkFields(resp.Data)
+	data, err := json.Marshal(cleaned)
 	if err != nil {
 		return mcp.NewToolResultText(fmt.Sprintf("%v", resp.Data)), nil
 	}
+
+	const maxResponseBytes = 12_000
+	if len(data) > maxResponseBytes {
+		data = append(data[:maxResponseBytes], []byte("...(truncated)")...)
+	}
 	return mcp.NewToolResultText(string(data)), nil
+}
+
+// stripBulkFields recursively removes fields that bloat responses
+// (e.g. base64 attachment IDs, raw HTML bodies) to keep tool results
+// small enough for LLM context windows.
+func stripBulkFields(v any) any {
+	switch val := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(val))
+		for k, child := range val {
+			switch k {
+			case "attachmentId", "raw", "htmlBody":
+				continue
+			case "attachmentList":
+				if list, ok := child.([]any); ok {
+					slim := make([]any, 0, len(list))
+					for _, item := range list {
+						if m, ok := item.(map[string]any); ok {
+							slim = append(slim, map[string]any{
+								"filename": m["filename"],
+								"mimeType": m["mimeType"],
+							})
+						}
+					}
+					out[k] = slim
+				}
+			default:
+				out[k] = stripBulkFields(child)
+			}
+		}
+		return out
+	case []any:
+		out := make([]any, len(val))
+		for i, child := range val {
+			out[i] = stripBulkFields(child)
+		}
+		return out
+	default:
+		return v
+	}
 }

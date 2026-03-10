@@ -67,8 +67,7 @@ type ToolHandler func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTo
 // The auth manager uses this interface to delegate connection flows to Composio.
 type ComposioAuthProvider interface {
 	PlatformAdapter
-	AuthConfigID() string
-	IntegrationID() string // UUID used in API calls
+	AuthConfigID() string // ac_xxx used in v3 link API
 	ComposioClient() *composio.Client
 	ComposioAppName() string
 }
