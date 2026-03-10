@@ -120,6 +120,7 @@ func (s *Server) handleListAccounts(ctx context.Context, req mcp.CallToolRequest
 	if !ok || userID == "" {
 		return mcp.NewToolResultError("user_id is required"), nil
 	}
+	log.Printf("[MCP] connector_list_accounts user=%s", userID)
 
 	accounts, err := s.authMgr.ListAccounts(ctx, userID)
 	if err != nil {
@@ -153,6 +154,7 @@ func (s *Server) handleConnect(ctx context.Context, req mcp.CallToolRequest) (*m
 	if userID == "" || platform == "" {
 		return mcp.NewToolResultError("user_id and platform are required"), nil
 	}
+	log.Printf("[MCP] connector_connect user=%s platform=%s", userID, platform)
 
 	redirectURL, err := s.authMgr.InitiateOAuth(ctx, userID, platform, callbackURL)
 	if err != nil {
@@ -192,6 +194,7 @@ func (s *Server) handleDiscoverTools(ctx context.Context, req mcp.CallToolReques
 	if a == nil {
 		return mcp.NewToolResultError(fmt.Sprintf("unknown platform: %s", platform)), nil
 	}
+	log.Printf("[MCP] connector_discover_tools platform=%s tools=%d", platform, len(a.Tools()))
 
 	tools := a.Tools()
 	prefix := a.Name() + "_"
@@ -250,8 +253,16 @@ func (s *Server) handleExecute(ctx context.Context, req mcp.CallToolRequest) (*m
 		return mcp.NewToolResultError("user_id, platform, and action are required"), nil
 	}
 
+	// Extract params (nested object)
+	params := make(map[string]any)
+	if p, ok := args["params"].(map[string]any); ok {
+		params = p
+	}
+	log.Printf("[MCP] connector_execute user=%s platform=%s action=%s params=%v", userID, platform, action, params)
+
 	a := s.registry.Get(platform)
 	if a == nil {
+		log.Printf("[MCP] connector_execute FAIL: unknown platform %s", platform)
 		return mcp.NewToolResultError(fmt.Sprintf("unknown platform: %s", platform)), nil
 	}
 
@@ -261,6 +272,7 @@ func (s *Server) handleExecute(ctx context.Context, req mcp.CallToolRequest) (*m
 		var err error
 		token, err = s.authMgr.GetActiveToken(ctx, userID, platform)
 		if err != nil {
+			log.Printf("[MCP] connector_execute FAIL: user %s not connected to %s", userID, platform)
 			return mcp.NewToolResultError(fmt.Sprintf(
 				"User not connected to %s. Use connector_connect to initiate authorization.",
 				a.DisplayName(),
@@ -268,13 +280,17 @@ func (s *Server) handleExecute(ctx context.Context, req mcp.CallToolRequest) (*m
 		}
 	}
 
-	// Extract params (nested object)
-	params := make(map[string]any)
-	if p, ok := args["params"].(map[string]any); ok {
-		params = p
+	result, execErr := a.Execute(ctx, action, params, token, userID)
+	if result != nil && len(result.Content) > 0 {
+		if txt, ok := result.Content[0].(mcp.TextContent); ok {
+			preview := txt.Text
+			if len(preview) > 300 {
+				preview = preview[:300] + "..."
+			}
+			log.Printf("[MCP] connector_execute DONE platform=%s action=%s isError=%v result=%s", platform, action, result.IsError, preview)
+		}
 	}
-
-	return a.Execute(ctx, action, params, token, userID)
+	return result, execErr
 }
 
 // NewHandler returns an http.Handler for embedding in a shared mux.
