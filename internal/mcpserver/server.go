@@ -255,13 +255,17 @@ func (s *Server) handleExecute(ctx context.Context, req mcp.CallToolRequest) (*m
 		return mcp.NewToolResultError(fmt.Sprintf("unknown platform: %s", platform)), nil
 	}
 
-	// Get active token
-	token, err := s.authMgr.GetActiveToken(ctx, userID, platform)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf(
-			"User not connected to %s. Use connector_connect to initiate authorization.",
-			a.DisplayName(),
-		)), nil
+	// Bot-token adapters use a server-side token — no per-user OAuth needed.
+	var token string
+	if a.AuthScheme() != adapter.AuthBotToken {
+		var err error
+		token, err = s.authMgr.GetActiveToken(ctx, userID, platform)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf(
+				"User not connected to %s. Use connector_connect to initiate authorization.",
+				a.DisplayName(),
+			)), nil
+		}
 	}
 
 	// Extract params (nested object)
