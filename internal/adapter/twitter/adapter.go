@@ -17,9 +17,15 @@ import (
 const apiBase = "https://api.twitter.com"
 
 // Adapter implements adapter.PlatformAdapter for Twitter/X via direct OAuth 2.0.
-type Adapter struct{}
+type Adapter struct {
+	extraTools []adapter.ExtraTool
+}
 
 func New() *Adapter { return &Adapter{} }
+
+func (a *Adapter) AddExtraTool(t adapter.ExtraTool) {
+	a.extraTools = append(a.extraTools, t)
+}
 
 func (a *Adapter) Name() string                   { return "twitter" }
 func (a *Adapter) DisplayName() string            { return "Twitter / X" }
@@ -36,7 +42,7 @@ func (a *Adapter) OAuthConfig() *adapter.OAuthConfig {
 }
 
 func (a *Adapter) Tools() []mcp.Tool {
-	return []mcp.Tool{
+	tools := []mcp.Tool{
 		mcp.NewTool("twitter_create_tweet",
 			mcp.WithDescription("Post a new tweet. Free tier limit: 500 tweets/month per user."),
 			mcp.WithString("text", mcp.Required(), mcp.Description("Tweet text (max 280 characters)")),
@@ -49,9 +55,22 @@ func (a *Adapter) Tools() []mcp.Tool {
 			mcp.WithDescription("Get the authenticated user's Twitter profile (id, name, username, description)."),
 		),
 	}
+	for _, t := range a.extraTools {
+		tools = append(tools, mcp.Tool{
+			Name:        "twitter_" + t.LocalName,
+			Description: t.Description,
+			InputSchema: t.Schema,
+		})
+	}
+	return tools
 }
 
 func (a *Adapter) Execute(ctx context.Context, toolName string, args map[string]any, token, _ string) (*mcp.CallToolResult, error) {
+	for _, t := range a.extraTools {
+		if t.LocalName == toolName {
+			return t.Execute(ctx, args)
+		}
+	}
 	switch toolName {
 	case "create_tweet":
 		return a.createTweet(ctx, args, token)
