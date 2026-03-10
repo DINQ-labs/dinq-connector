@@ -18,7 +18,8 @@ const (
 	AuthOAuth2   AuthScheme = "oauth2"
 	AuthAPIKey   AuthScheme = "api_key"
 	AuthBearer   AuthScheme = "bearer"
-	AuthComposio AuthScheme = "composio" // OAuth managed by Composio
+	AuthComposio AuthScheme = "composio"  // OAuth managed by Composio
+	AuthBotToken AuthScheme = "bot_token" // Server-side bot token, no per-user OAuth
 )
 
 // OAuthConfig holds the OAuth2 configuration for a platform.
