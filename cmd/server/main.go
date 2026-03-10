@@ -17,6 +17,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/DINQ-labs/dinq-connector/internal/adapter"
+	"github.com/DINQ-labs/dinq-connector/internal/adapter/discord_bot"
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/github"
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/twitter"
 	"github.com/DINQ-labs/dinq-connector/internal/apify"
@@ -79,13 +80,19 @@ func main() {
 			{"COMPOSIO_GOOGLE_CALENDAR_AUTH_CONFIG_ID", "googlecalendar", "Google Calendar", "googlecalendar"},
 			{"COMPOSIO_GOOGLE_SHEETS_AUTH_CONFIG_ID", "googlesheets", "Google Sheets", "googlesheets"},
 			{"COMPOSIO_NOTION_AUTH_CONFIG_ID", "notion", "Notion", "notion"},
+			// discord skipped here if DISCORD_BOT_TOKEN is set (registered separately below)
 			{"COMPOSIO_SLACK_AUTH_CONFIG_ID", "slack", "Slack", "slack"},
 			{"COMPOSIO_DISCORD_AUTH_CONFIG_ID", "discord", "Discord", "discord"},
 			{"COMPOSIO_OUTLOOK_AUTH_CONFIG_ID", "outlook", "Outlook", "outlook"},
 			{"COMPOSIO_REDDIT_AUTH_CONFIG_ID", "reddit", "Reddit", "reddit"},
 		}
 
+		discordBotToken := os.Getenv("DISCORD_BOT_TOKEN")
 		for _, p := range dynamicPlatforms {
+			// Skip Composio discord if bot token is configured
+			if p.platform == "discord" && discordBotToken != "" {
+				continue
+			}
 			id := os.Getenv(p.envKey)
 			if id == "" {
 				continue
@@ -97,6 +104,12 @@ func main() {
 			}
 			registry.Register(a)
 			log.Printf("[Registry] %s registered (%d tools via Composio)", p.displayName, len(a.Tools()))
+		}
+
+		// Discord Bot Token adapter — replaces Composio discord (can send messages)
+		if discordBotToken != "" {
+			registry.Register(discord_bot.New(discordBotToken))
+			log.Println("[Registry] Discord registered (Bot Token — send_message enabled)")
 		}
 	}
 
