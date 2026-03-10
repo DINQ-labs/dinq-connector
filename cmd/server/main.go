@@ -18,6 +18,7 @@ import (
 
 	"github.com/DINQ-labs/dinq-connector/internal/adapter"
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/github"
+	"github.com/DINQ-labs/dinq-connector/internal/adapter/twitter"
 	"github.com/DINQ-labs/dinq-connector/internal/apify"
 	"github.com/DINQ-labs/dinq-connector/internal/auth"
 	"github.com/DINQ-labs/dinq-connector/internal/composio"
@@ -99,11 +100,10 @@ func main() {
 		}
 	}
 
-	// Twitter: disabled — API 503 service unavailable (rate limits / policy)
-	// if os.Getenv("TWITTER_CLIENT_ID") != "" {
-	// 	registry.Register(twitter.New())
-	// 	log.Println("[Registry] Twitter registered (direct OAuth 2.0)")
-	// }
+	if os.Getenv("TWITTER_CLIENT_ID") != "" {
+		registry.Register(twitter.New())
+		log.Println("[Registry] Twitter registered (direct OAuth 2.0)")
+	}
 
 	// Attach Apify post-search tools to LinkedIn and Twitter adapters.
 	// These tools appear under connector_discover_tools(platform="linkedin/twitter").
@@ -180,8 +180,14 @@ func attachApifySearchTools(registry *adapter.Registry, client *apify.Client) {
 	}
 
 	if tw := registry.Get("twitter"); tw != nil {
-		if ca, ok := tw.(*adapter.ComposioAdapter); ok {
-			ca.AddExtraTool(adapter.ExtraTool{
+		addTwitterSearch := func(t adapter.ExtraTool) {
+			if ca, ok := tw.(*adapter.ComposioAdapter); ok {
+				ca.AddExtraTool(t)
+			} else if ta, ok := tw.(*twitter.Adapter); ok {
+				ta.AddExtraTool(t)
+			}
+		}
+		addTwitterSearch(adapter.ExtraTool{
 				LocalName:   "search_posts",
 				Description: "Search Twitter/X posts by keywords or hashtags. Returns matching tweets with author, content, likes, retweets, and URL.",
 				Schema: mcp.ToolInputSchema{
@@ -209,8 +215,7 @@ func attachApifySearchTools(registry *adapter.Registry, client *apify.Client) {
 					return mcp.NewToolResultText(string(data)), nil
 				},
 			})
-			log.Println("[Registry] Twitter: attached Apify post search tool")
-		}
+		log.Println("[Registry] Twitter: attached Apify post search tool")
 	}
 }
 
