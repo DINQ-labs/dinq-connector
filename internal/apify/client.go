@@ -54,7 +54,7 @@ func (c *Client) RunActor(ctx context.Context, actorID string, input map[string]
 		return nil, err
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return nil, fmt.Errorf("apify error %d: %s", resp.StatusCode, string(data))
 	}
 

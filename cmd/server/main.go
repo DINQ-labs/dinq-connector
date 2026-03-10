@@ -46,58 +46,39 @@ func main() {
 	registry := adapter.NewRegistry()
 	registry.Register(github.New())
 
-	// Composio-backed adapters
+	// Composio-backed adapters (v3 API uses auth_config_id directly, no integration UUIDs needed)
 	if apiKey := os.Getenv("COMPOSIO_API_KEY"); apiKey != "" {
 		cc := composio.NewClient(apiKey)
 		ctx := context.Background()
 
-		// Fetch all integration UUIDs once (needed for InitiateConnection v3 API)
-		integrations, err := cc.GetIntegrations(ctx)
-		if err != nil {
-			log.Printf("[Composio] Warning: failed to fetch integrations: %v", err)
-			integrations = map[string]composio.Integration{}
-		} else {
-			log.Printf("[Composio] Loaded %d integration UUIDs", len(integrations))
-		}
-		integrationID := func(appName string) string {
-			if i, ok := integrations[appName]; ok {
-				return i.ID
-			}
-			return ""
-		}
-
-		// (Twitter is now direct OAuth 2.0; see registration below)
-
-		// All other platforms: dynamic — tools fetched from Composio API at startup
 		dynamicPlatforms := []struct {
 			envKey      string
 			platform    string
 			displayName string
 			appName     string
+			exclude     []string // tool names to exclude
 		}{
-			{"COMPOSIO_LINKEDIN_AUTH_CONFIG_ID", "linkedin", "LinkedIn", "linkedin"},
-			{"COMPOSIO_GMAIL_AUTH_CONFIG_ID", "gmail", "Gmail", "gmail"},
-			{"COMPOSIO_GOOGLE_CALENDAR_AUTH_CONFIG_ID", "googlecalendar", "Google Calendar", "googlecalendar"},
-			{"COMPOSIO_GOOGLE_SHEETS_AUTH_CONFIG_ID", "googlesheets", "Google Sheets", "googlesheets"},
-			{"COMPOSIO_NOTION_AUTH_CONFIG_ID", "notion", "Notion", "notion"},
-			// discord skipped here if DISCORD_BOT_TOKEN is set (registered separately below)
-			{"COMPOSIO_SLACK_AUTH_CONFIG_ID", "slack", "Slack", "slack"},
-			{"COMPOSIO_DISCORD_AUTH_CONFIG_ID", "discord", "Discord", "discord"},
-			{"COMPOSIO_OUTLOOK_AUTH_CONFIG_ID", "outlook", "Outlook", "outlook"},
-			{"COMPOSIO_REDDIT_AUTH_CONFIG_ID", "reddit", "Reddit", "reddit"},
+			{"COMPOSIO_LINKEDIN_AUTH_CONFIG_ID", "linkedin", "LinkedIn", "linkedin", nil},
+			{"COMPOSIO_GMAIL_AUTH_CONFIG_ID", "gmail", "Gmail", "gmail", []string{"delete_message"}},
+			{"COMPOSIO_GOOGLE_CALENDAR_AUTH_CONFIG_ID", "googlecalendar", "Google Calendar", "googlecalendar", nil},
+			{"COMPOSIO_GOOGLE_SHEETS_AUTH_CONFIG_ID", "googlesheets", "Google Sheets", "googlesheets", nil},
+			{"COMPOSIO_NOTION_AUTH_CONFIG_ID", "notion", "Notion", "notion", nil},
+			{"COMPOSIO_SLACK_AUTH_CONFIG_ID", "slack", "Slack", "slack", nil},
+			{"COMPOSIO_DISCORD_AUTH_CONFIG_ID", "discord", "Discord", "discord", nil},
+			{"COMPOSIO_OUTLOOK_AUTH_CONFIG_ID", "outlook", "Outlook", "outlook", nil},
+			{"COMPOSIO_REDDIT_AUTH_CONFIG_ID", "reddit", "Reddit", "reddit", nil},
 		}
 
 		discordBotToken := os.Getenv("DISCORD_BOT_TOKEN")
 		for _, p := range dynamicPlatforms {
-			// Skip Composio discord if bot token is configured
 			if p.platform == "discord" && discordBotToken != "" {
 				continue
 			}
-			id := os.Getenv(p.envKey)
-			if id == "" {
+			authConfigID := os.Getenv(p.envKey)
+			if authConfigID == "" {
 				continue
 			}
-			a, err := adapter.NewDynamicComposioAdapter(ctx, cc, p.platform, p.displayName, id, integrationID(p.appName), p.appName)
+			a, err := adapter.NewDynamicComposioAdapter(ctx, cc, p.platform, p.displayName, authConfigID, p.appName, p.exclude...)
 			if err != nil {
 				log.Printf("[Registry] Warning: %s skipped: %v", p.displayName, err)
 				continue
@@ -174,11 +155,13 @@ func attachApifySearchTools(registry *adapter.Registry, client *apify.Client) {
 					Required: []string{"keywords"},
 				},
 				Execute: func(ctx context.Context, args map[string]any) (*mcp.CallToolResult, error) {
-					input := map[string]any{"keywords": args["keywords"]}
-					if limit, ok := args["limit"]; ok {
-						input["count"] = limit
-					} else {
-						input["count"] = 10
+					maxPosts := 10
+					if l, ok := args["limit"].(float64); ok {
+						maxPosts = int(l)
+					}
+					input := map[string]any{
+						"searchQueries": []string{fmt.Sprintf("%v", args["keywords"])},
+						"maxPosts":      maxPosts,
 					}
 					items, err := client.RunActor(ctx, "harvestapi~linkedin-post-search", input)
 					if err != nil {
@@ -201,33 +184,33 @@ func attachApifySearchTools(registry *adapter.Registry, client *apify.Client) {
 			}
 		}
 		addTwitterSearch(adapter.ExtraTool{
-				LocalName:   "search_posts",
-				Description: "Search Twitter/X posts by keywords or hashtags. Returns matching tweets with author, content, likes, retweets, and URL.",
-				Schema: mcp.ToolInputSchema{
-					Type: "object",
-					Properties: map[string]any{
-						"query": map[string]any{"type": "string", "description": "Search query, keywords, or hashtags"},
-						"limit": map[string]any{"type": "integer", "description": "Max results to return (default 10, max 100)"},
-					},
-					Required: []string{"query"},
+			LocalName:   "search_posts",
+			Description: "Search Twitter/X posts by keywords or hashtags. Returns matching tweets with author, content, likes, retweets, and URL.",
+			Schema: mcp.ToolInputSchema{
+				Type: "object",
+				Properties: map[string]any{
+					"query": map[string]any{"type": "string", "description": "Search query, keywords, or hashtags"},
+					"limit": map[string]any{"type": "integer", "description": "Max results to return (default 10, max 100)"},
 				},
-				Execute: func(ctx context.Context, args map[string]any) (*mcp.CallToolResult, error) {
-					limit := 10
-					if l, ok := args["limit"].(float64); ok {
-						limit = int(l)
-					}
-					input := map[string]any{
-						"searchTerms": []string{fmt.Sprintf("%v", args["query"])},
-						"maxItems":    limit,
-					}
-					items, err := client.RunActor(ctx, "scraper_one~x-posts-search", input)
-					if err != nil {
-						return mcp.NewToolResultError("Twitter search error: " + err.Error()), nil
-					}
-					data, _ := json.Marshal(items)
-					return mcp.NewToolResultText(string(data)), nil
-				},
-			})
+				Required: []string{"query"},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (*mcp.CallToolResult, error) {
+				limit := 10
+				if l, ok := args["limit"].(float64); ok {
+					limit = int(l)
+				}
+				input := map[string]any{
+					"query":        fmt.Sprintf("%v", args["query"]),
+					"resultsCount": limit,
+				}
+				items, err := client.RunActor(ctx, "scraper_one~x-posts-search", input)
+				if err != nil {
+					return mcp.NewToolResultError("Twitter search error: " + err.Error()), nil
+				}
+				data, _ := json.Marshal(items)
+				return mcp.NewToolResultText(string(data)), nil
+			},
+		})
 		log.Println("[Registry] Twitter: attached Apify post search tool")
 	}
 }
