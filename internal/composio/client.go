@@ -37,29 +37,26 @@ func NewClient(apiKey string) *Client {
 // Connected Accounts
 // ---------------------------------------------------------------------------
 
-// InitiateConnectionRequest is the input for initiating a user connection.
-type InitiateConnectionRequest struct {
-	IntegrationID string         `json:"integrationId"`      // UUID from /v1/integrations
-	EntityID      string         `json:"entityId,omitempty"` // user entity; set to our user_id
-	Data          map[string]any `json:"data"`               // empty object required
-	RedirectURI   string         `json:"redirectUri,omitempty"`
+// InitiateLinkRequest is the input for creating an auth link session (v3 API).
+type InitiateLinkRequest struct {
+	AuthConfigID string `json:"auth_config_id"` // ac_xxx from dashboard
+	UserID       string `json:"user_id"`
+	CallbackURL  string `json:"callback_url,omitempty"`
 }
 
-// InitiateConnectionResponse is returned after starting OAuth.
-type InitiateConnectionResponse struct {
-	RedirectURL        string `json:"redirectUrl"`
-	ConnectionStatus   string `json:"connectionStatus"` // INITIATED, ACTIVE, etc.
-	ConnectedAccountID string `json:"connectedAccountId"`
+// InitiateLinkResponse is returned after creating an auth link session.
+type InitiateLinkResponse struct {
+	LinkToken          string `json:"link_token"`
+	RedirectURL        string `json:"redirect_url"`
+	ExpiresAt          string `json:"expires_at"`
+	ConnectedAccountID string `json:"connected_account_id"`
 }
 
-// InitiateConnection starts an OAuth flow for a user on a platform.
-func (c *Client) InitiateConnection(ctx context.Context, req InitiateConnectionRequest) (*InitiateConnectionResponse, error) {
-	if req.Data == nil {
-		req.Data = map[string]any{}
-	}
-	var resp InitiateConnectionResponse
-	err := c.post(ctx, "/v1/connectedAccounts", req, &resp)
-	if err != nil {
+// InitiateLink creates an auth link session via the v3 API.
+// Returns a redirect URL the user should visit to complete OAuth.
+func (c *Client) InitiateLink(ctx context.Context, req InitiateLinkRequest) (*InitiateLinkResponse, error) {
+	var resp InitiateLinkResponse
+	if err := c.post(ctx, "/v3/connected_accounts/link", req, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -94,11 +91,10 @@ type ConnectedAccount struct {
 	AppName string `json:"appName"`
 }
 
-// GetConnection retrieves a connected account by ID.
+// GetConnection retrieves a connected account by ID (v3 API).
 func (c *Client) GetConnection(ctx context.Context, connectedAccountID string) (*ConnectedAccount, error) {
 	var resp ConnectedAccount
-	err := c.get(ctx, "/v1/connectedAccounts/"+connectedAccountID, &resp)
-	if err != nil {
+	if err := c.get(ctx, "/v3/connected_accounts/"+connectedAccountID, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -109,89 +105,101 @@ type ListConnectionsResponse struct {
 	Items []ConnectedAccount `json:"items"`
 }
 
-// ListConnections lists active connections for a user, optionally filtered by app.
+// ListConnections lists active connections for a user, optionally filtered by toolkit (v3 API).
 func (c *Client) ListConnections(ctx context.Context, userID, appName string) ([]ConnectedAccount, error) {
-	params := url.Values{"user_id": {userID}, "status": {"ACTIVE"}}
+	params := url.Values{"user_ids": {userID}, "statuses": {"ACTIVE"}}
 	if appName != "" {
-		params.Set("app_name", appName)
+		params.Set("toolkit_slugs", appName)
 	}
 	var resp ListConnectionsResponse
-	err := c.get(ctx, "/v1/connectedAccounts?"+params.Encode(), &resp)
-	if err != nil {
+	if err := c.get(ctx, "/v3/connected_accounts?"+params.Encode(), &resp); err != nil {
 		return nil, err
 	}
 	return resp.Items, nil
 }
 
 // ---------------------------------------------------------------------------
-// Actions
+// Tools (v3 API)
 // ---------------------------------------------------------------------------
 
-// Action represents a Composio action definition (from listing API).
-type Action struct {
-	Name        string           `json:"name"`        // e.g. "GMAIL_SEND_EMAIL"
-	DisplayName string           `json:"displayName"` // e.g. "Send Email"
-	Description string           `json:"description"`
-	AppName     string           `json:"appName"`
-	Version     string           `json:"version"` // e.g. "20260307_00"
-	Parameters  ActionParameters `json:"parameters"`
+// ToolV3 represents a tool definition from the v3 tools API.
+type ToolV3 struct {
+	Slug              string           `json:"slug"` // e.g. "SLACK_SEND_MESSAGE"
+	Name              string           `json:"name"` // e.g. "Send message"
+	Description       string           `json:"description"`
+	Version           string           `json:"version"`            // default version from list
+	AvailableVersions []string         `json:"available_versions"` // newest first
+	InputParameters   ActionParameters `json:"input_parameters"`
+	IsDeprecated      bool             `json:"is_deprecated"`
+	Deprecated        any              `json:"deprecated"` // bool or object depending on API response
 }
 
-// ActionParameters holds the JSON Schema for an action's input.
+// LatestVersion returns the newest available version, falling back to the default.
+func (t ToolV3) LatestVersion() string {
+	if len(t.AvailableVersions) > 0 {
+		return t.AvailableVersions[0]
+	}
+	return t.Version
+}
+
+// ActionParameters holds the JSON Schema for a tool's input.
 type ActionParameters struct {
 	Type       string         `json:"type"`
 	Properties map[string]any `json:"properties"`
 	Required   []string       `json:"required"`
 }
 
-// ListActions fetches available actions for an app from Composio.
-func (c *Client) ListActions(ctx context.Context, appName string, limit int) ([]Action, error) {
-	if limit <= 0 {
-		limit = 30
+// ListToolsV3 lists tools for an app via the v3 API.
+// If importantOnly is true, only tools tagged "important" are returned.
+func (c *Client) ListToolsV3(ctx context.Context, appName string, importantOnly bool) ([]ToolV3, error) {
+	params := url.Values{
+		"toolkit_slug": {appName},
+		"limit":        {"200"},
 	}
-	path := fmt.Sprintf("/v2/actions?apps=%s&limit=%d", url.QueryEscape(appName), limit)
+	if importantOnly {
+		params.Set("tags", "important")
+	}
 	var resp struct {
-		Items []Action `json:"items"`
+		Items []ToolV3 `json:"items"`
 	}
-	err := c.get(ctx, path, &resp)
-	if err != nil {
+	if err := c.get(ctx, "/v3/tools?"+params.Encode(), &resp); err != nil {
 		return nil, err
 	}
-	log.Printf("[Composio] ListActions(%s): got %d raw actions", appName, len(resp.Items))
+	log.Printf("[Composio] ListToolsV3(%s, important=%v): %d tools", appName, importantOnly, len(resp.Items))
 	return resp.Items, nil
 }
 
-// ExecuteToolRequest is the input for the Composio v3 tools execute API.
-type ExecuteToolRequest struct {
-	ConnectedAccountID string         `json:"connected_account_id,omitempty"`
-	UserID             string         `json:"user_id,omitempty"`
-	Arguments          map[string]any `json:"arguments"` // always send — v3 requires exactly one of 'text' or 'arguments'
-	Version            string         `json:"version,omitempty"`
+// GetToolV3 fetches a single tool by slug, including full available_versions.
+func (c *Client) GetToolV3(ctx context.Context, slug string) (*ToolV3, error) {
+	var resp ToolV3
+	if err := c.get(ctx, "/v3/tools/"+url.PathEscape(slug), &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
-// ExecuteActionResponse is the unified output returned to callers after tool execution.
+// ExecuteToolRequest is the input for the v3 tools execute API.
+type ExecuteToolRequest struct {
+	UserID    string         `json:"user_id"`
+	Arguments map[string]any `json:"arguments"`
+	Version   string         `json:"version,omitempty"`
+}
+
+// ExecuteActionResponse is the unified output returned after tool execution.
 type ExecuteActionResponse struct {
 	Data       any    `json:"data"`
 	Error      string `json:"error,omitempty"`
 	Successful bool   `json:"successful"`
 }
 
-// executeToolV3Response is the raw envelope from POST /v3/tools/execute/{slug}.
-// Actual structure: {"data": <tool-specific object>, "successful": bool, "error": null|string}
-type executeToolV3Response struct {
-	Data       any  `json:"data"`
-	Successful bool `json:"successful"`
-	Error      any  `json:"error"` // null or string
-}
-
-// ExecuteTool runs a tool via the Composio v3 tools API.
-func (c *Client) ExecuteTool(ctx context.Context, toolSlug string, req ExecuteToolRequest) (*ExecuteActionResponse, error) {
+// ExecuteTool runs a tool via the v3 tools execute API.
+func (c *Client) ExecuteTool(ctx context.Context, slug string, req ExecuteToolRequest) (*ExecuteActionResponse, error) {
 	bodyData, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, "POST",
-		c.baseURL+"/v3/tools/execute/"+url.PathEscape(toolSlug),
+		c.baseURL+"/v3/tools/execute/"+url.PathEscape(slug),
 		bytes.NewReader(bodyData),
 	)
 	if err != nil {
@@ -211,24 +219,28 @@ func (c *Client) ExecuteTool(ctx context.Context, toolSlug string, req ExecuteTo
 		return nil, fmt.Errorf("composio read body: %w", err)
 	}
 
-	log.Printf("[Composio] ExecuteTool %s status=%d body=%s", toolSlug, resp.StatusCode, truncateLog(string(raw), 500))
+	log.Printf("[Composio] ExecuteTool %s status=%d body=%s", slug, resp.StatusCode, truncateLog(string(raw), 500))
 
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("composio API error %d: %s", resp.StatusCode, string(raw))
 	}
 
-	var v3resp executeToolV3Response
-	if err := json.Unmarshal(raw, &v3resp); err != nil {
+	var result struct {
+		Data       any  `json:"data"`
+		Successful bool `json:"successful"`
+		Error      any  `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, fmt.Errorf("composio decode: %w", err)
 	}
 	var errStr string
-	if s, ok := v3resp.Error.(string); ok {
+	if s, ok := result.Error.(string); ok {
 		errStr = s
 	}
 	return &ExecuteActionResponse{
-		Data:       v3resp.Data,
+		Data:       result.Data,
 		Error:      errStr,
-		Successful: v3resp.Successful,
+		Successful: result.Successful,
 	}, nil
 }
 
