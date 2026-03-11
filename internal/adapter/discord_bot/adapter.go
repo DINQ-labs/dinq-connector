@@ -27,32 +27,50 @@ func New(botToken string) *Adapter {
 	return &Adapter{token: botToken}
 }
 
-func (a *Adapter) Name() string                   { return "discord" }
-func (a *Adapter) DisplayName() string            { return "Discord" }
-func (a *Adapter) AuthScheme() adapter.AuthScheme { return adapter.AuthBotToken }
+func (a *Adapter) Name() string                      { return "discord" }
+func (a *Adapter) DisplayName() string               { return "Discord" }
+func (a *Adapter) AuthScheme() adapter.AuthScheme    { return adapter.AuthBotToken }
 func (a *Adapter) OAuthConfig() *adapter.OAuthConfig { return nil }
 
 func (a *Adapter) Tools() []mcp.Tool {
 	return []mcp.Tool{
 		mcp.NewTool("discord_send_message",
-			mcp.WithDescription("Send a message to a Discord channel."),
-			mcp.WithString("channel_id", mcp.Required(), mcp.Description("Discord channel ID")),
+			mcp.WithDescription(
+				"[WRITE — confirm before calling] Send a message to a Discord channel. "+
+					"Posts publicly in the server — confirm channel and content first. "+
+					"If channel_id is unknown, call discord_get_channels first to find it.",
+			),
+			mcp.WithString("channel_id", mcp.Required(), mcp.Description("Discord channel ID (get from discord_get_channels)")),
 			mcp.WithString("content", mcp.Required(), mcp.Description("Message text to send")),
 		),
 		mcp.NewTool("discord_get_messages",
-			mcp.WithDescription("Read recent messages from a Discord channel."),
-			mcp.WithString("channel_id", mcp.Required(), mcp.Description("Discord channel ID")),
+			mcp.WithDescription(
+				"[READ] Read recent messages from a Discord channel. "+
+					"Call to check conversation history, monitor activity, or gather context before responding. "+
+					"If channel_id is unknown, call discord_get_channels first.",
+			),
+			mcp.WithString("channel_id", mcp.Required(), mcp.Description("Discord channel ID (get from discord_get_channels)")),
 			mcp.WithNumber("limit", mcp.Description("Number of messages to fetch (default 20, max 100)")),
 		),
 		mcp.NewTool("discord_get_guilds",
-			mcp.WithDescription("List all Discord servers (guilds) the bot is a member of."),
+			mcp.WithDescription(
+				"[READ] List all Discord servers the bot is a member of. "+
+					"Call first to discover available servers and get guild_ids — needed before calling discord_get_channels.",
+			),
 		),
 		mcp.NewTool("discord_get_channels",
-			mcp.WithDescription("List all channels in a Discord server."),
-			mcp.WithString("guild_id", mcp.Required(), mcp.Description("Discord server (guild) ID")),
+			mcp.WithDescription(
+				"[READ] List all channels in a Discord server. "+
+					"Call to find channel names and IDs — required before sending messages or reading history. "+
+					"Requires guild_id from discord_get_guilds.",
+			),
+			mcp.WithString("guild_id", mcp.Required(), mcp.Description("Discord server (guild) ID (get from discord_get_guilds)")),
 		),
 		mcp.NewTool("discord_get_me",
-			mcp.WithDescription("Get the bot's own Discord user info."),
+			mcp.WithDescription(
+				"[READ] Get the bot's Discord identity: username, id, discriminator. "+
+					"Useful for debugging or when the user asks about the bot's Discord account.",
+			),
 		),
 	}
 }

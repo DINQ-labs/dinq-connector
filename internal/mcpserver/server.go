@@ -76,7 +76,12 @@ func (s *Server) registerMetaTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("connector_list_accounts",
-			mcp.WithDescription("List all connected platform accounts for a user. Shows which platforms are connected and their status."),
+			mcp.WithDescription(
+				"Check which platforms the user has connected. "+
+					"Call this FIRST before any platform action — never assume a platform is connected. "+
+					"Status meanings: 'active'=ready to use; 'initiated'=OAuth started but user hasn't completed it yet (send them the auth link again); 'expired'=token expired, call connector_connect to re-authorize. "+
+					"Available platforms: "+platformList,
+			),
 			mcp.WithString("user_id", mcp.Required(), mcp.Description("User ID")),
 		),
 		s.handleListAccounts,
@@ -84,7 +89,14 @@ func (s *Server) registerMetaTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("connector_connect",
-			mcp.WithDescription("Start connecting a user to a platform. Returns an authorization URL the user must visit to grant access."),
+			mcp.WithDescription(
+				"Initiate OAuth authorization for a platform. "+
+					"Call when: (1) connector_list_accounts shows platform is not connected or 'initiated'; (2) connector_execute returns 'User not connected'. "+
+					"Returns a URL — present it to the user exactly as: {{AUTH_LINK[platform=xxx]<EXACT_URL>}}. "+
+					"NEVER modify, shorten, or guess the URL. If this tool fails, tell the user it failed. "+
+					"After the user visits the URL and authorizes, the platform status becomes 'active'. "+
+					"Platforms: "+platformList,
+			),
 			mcp.WithString("user_id", mcp.Required(), mcp.Description("User ID")),
 			mcp.WithString("platform", mcp.Required(), mcp.Description("Platform to connect: "+platformList)),
 			mcp.WithString("callback_url", mcp.Description("URL to redirect after authorization")),
@@ -94,7 +106,12 @@ func (s *Server) registerMetaTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("connector_discover_tools",
-			mcp.WithDescription("Discover available actions/tools for a specific platform. Returns action names, descriptions, and parameter schemas. Call this BEFORE connector_execute to know what actions and parameters are available."),
+			mcp.WithDescription(
+				"List all available actions for a platform, with parameter schemas and descriptions. "+
+					"MUST be called before connector_execute — do not guess action names or params. "+
+					"Call once per platform per conversation and reuse the result; do not call repeatedly for the same platform. "+
+					"Platforms: "+platformList,
+			),
 			mcp.WithString("platform", mcp.Required(), mcp.Description("Platform to discover tools for: "+platformList)),
 		),
 		s.handleDiscoverTools,
@@ -102,11 +119,19 @@ func (s *Server) registerMetaTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("connector_execute",
-			mcp.WithDescription("Execute an action on a connected platform. Use connector_discover_tools first to find available actions and their parameters."),
+			mcp.WithDescription(
+				"Execute an action on a connected platform. "+
+					"Prerequisites: (1) verify user is connected via connector_list_accounts; (2) call connector_discover_tools first to get valid action names and param schemas. "+
+					"WRITE actions (send, post, create, delete, update, reply) are irreversible — confirm with the user before calling. "+
+					"READ actions (list, get, search) are safe to call without confirmation. "+
+					"On 'User not connected' error: call connector_connect. "+
+					"On 'terminated' or network error: retry once. "+
+					"Platforms: "+platformList,
+			),
 			mcp.WithString("user_id", mcp.Required(), mcp.Description("User ID")),
 			mcp.WithString("platform", mcp.Required(), mcp.Description("Platform name: "+platformList)),
-			mcp.WithString("action", mcp.Required(), mcp.Description("Action name (from connector_discover_tools)")),
-			mcp.WithObject("params", mcp.Description("Action-specific parameters (from connector_discover_tools schema)")),
+			mcp.WithString("action", mcp.Required(), mcp.Description("Action name exactly as returned by connector_discover_tools")),
+			mcp.WithObject("params", mcp.Description("Action parameters matching the schema from connector_discover_tools")),
 		),
 		s.handleExecute,
 	)
@@ -266,9 +291,9 @@ func (s *Server) handleExecute(ctx context.Context, req mcp.CallToolRequest) (*m
 		return mcp.NewToolResultError(fmt.Sprintf("unknown platform: %s", platform)), nil
 	}
 
-	// Bot-token adapters use a server-side token — no per-user OAuth needed.
+	// Bot-token and dinq-internal adapters use server/user-id directly — no per-user OAuth needed.
 	var token string
-	if a.AuthScheme() != adapter.AuthBotToken {
+	if a.AuthScheme() != adapter.AuthBotToken && a.AuthScheme() != adapter.AuthDinqInternal {
 		var err error
 		token, err = s.authMgr.GetActiveToken(ctx, userID, platform)
 		if err != nil {

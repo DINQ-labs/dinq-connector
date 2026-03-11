@@ -36,36 +36,57 @@ func (a *Adapter) OAuthConfig() *adapter.OAuthConfig {
 func (a *Adapter) Tools() []mcp.Tool {
 	return []mcp.Tool{
 		mcp.NewTool("github_get_user",
-			mcp.WithDescription("Get the authenticated GitHub user's profile information"),
+			mcp.WithDescription(
+				"[READ] Get the authenticated user's GitHub profile: login, name, bio, public repo count, followers. "+
+					"Call to understand their GitHub identity or before suggesting GitHub-based actions.",
+			),
 		),
 		mcp.NewTool("github_list_repos",
-			mcp.WithDescription("List repositories for the authenticated user or a specified user/org"),
-			mcp.WithString("owner", mcp.Description("Username or org (omit for authenticated user)")),
+			mcp.WithDescription(
+				"[READ] List repos for the authenticated user or any GitHub user/org, sorted by last updated. "+
+					"Call to browse recent activity, find a repo to file an issue against, or understand someone's tech stack.",
+			),
+			mcp.WithString("owner", mcp.Description("Username or org (omit for authenticated user's own repos)")),
 			mcp.WithString("type", mcp.Description("Filter: all, owner, public, private, member"), mcp.Enum("all", "owner", "public", "private", "member")),
-			mcp.WithNumber("per_page", mcp.Description("Results per page (max 100)")),
+			mcp.WithNumber("per_page", mcp.Description("Results per page (max 100, default 30)")),
 		),
 		mcp.NewTool("github_list_issues",
-			mcp.WithDescription("List issues for a repository"),
-			mcp.WithString("owner", mcp.Required(), mcp.Description("Repository owner")),
+			mcp.WithDescription(
+				"[READ] List issues for a repository. "+
+					"Use state='open' for active work items, 'closed' for resolved, 'all' for full history. "+
+					"Call when checking project health, finding issue numbers, or reviewing bugs.",
+			),
+			mcp.WithString("owner", mcp.Required(), mcp.Description("Repository owner (username or org)")),
 			mcp.WithString("repo", mcp.Required(), mcp.Description("Repository name")),
-			mcp.WithString("state", mcp.Description("Filter: open, closed, all"), mcp.Enum("open", "closed", "all")),
-			mcp.WithNumber("per_page", mcp.Description("Results per page (max 100)")),
+			mcp.WithString("state", mcp.Description("Filter: open, closed, all (default: open)"), mcp.Enum("open", "closed", "all")),
+			mcp.WithNumber("per_page", mcp.Description("Results per page (max 100, default 30)")),
 		),
 		mcp.NewTool("github_create_issue",
-			mcp.WithDescription("Create a new issue in a repository"),
+			mcp.WithDescription(
+				"[WRITE — confirm before calling] Create a new issue in a repository. "+
+					"This is public and permanent — confirm title, body, and repo with the user before calling.",
+			),
 			mcp.WithString("owner", mcp.Required(), mcp.Description("Repository owner")),
 			mcp.WithString("repo", mcp.Required(), mcp.Description("Repository name")),
 			mcp.WithString("title", mcp.Required(), mcp.Description("Issue title")),
-			mcp.WithString("body", mcp.Description("Issue body (markdown)")),
-			mcp.WithString("labels", mcp.Description("Comma-separated labels")),
+			mcp.WithString("body", mcp.Description("Issue body (markdown supported)")),
+			mcp.WithString("labels", mcp.Description("Comma-separated label names")),
 		),
 		mcp.NewTool("github_list_notifications",
-			mcp.WithDescription("List unread notifications for the authenticated user"),
-			mcp.WithBoolean("all", mcp.Description("Include read notifications")),
+			mcp.WithDescription(
+				"[READ] List GitHub notifications: PR reviews, issue mentions, CI alerts. "+
+					"Call when the user wants to check what needs their attention. "+
+					"Default is unread only (all=false); set all=true to include already-read notifications.",
+			),
+			mcp.WithBoolean("all", mcp.Description("true=include read notifications, false=unread only (default)")),
 		),
 		mcp.NewTool("github_list_starred",
-			mcp.WithDescription("List repositories starred by the authenticated user"),
-			mcp.WithNumber("per_page", mcp.Description("Results per page")),
+			mcp.WithDescription(
+				"[READ] List repos starred by the authenticated user. "+
+					"Reveals their interests, go-to tools, and tech preferences — "+
+					"useful before making career suggestions or recommending projects.",
+			),
+			mcp.WithNumber("per_page", mcp.Description("Results per page (default 30)")),
 		),
 	}
 }
