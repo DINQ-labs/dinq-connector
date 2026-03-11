@@ -34,12 +34,13 @@ type ComposioToolMapping struct {
 
 // ComposioAdapterConfig configures a Composio-backed platform adapter.
 type ComposioAdapterConfig struct {
-	Platform     string                // "twitter", "linkedin"
-	DisplayName_ string                // "Twitter", "LinkedIn"
-	AuthConfigID string                // Composio auth config ID (from dashboard, ac_xxx)
-	AppName      string                // Composio app name, e.g. "twitter", "linkedin"
-	Tools_       []ComposioToolMapping // Tool definitions
-	ExtraTools   []ExtraTool           // Non-Composio tools (e.g. Apify search)
+	Platform             string                // "twitter", "linkedin"
+	DisplayName_         string                // "Twitter", "LinkedIn"
+	AuthConfigID         string                // Composio auth config ID (from dashboard, ac_xxx)
+	AppName              string                // Composio app name, e.g. "twitter", "linkedin"
+	Tools_               []ComposioToolMapping // Tool definitions
+	ExtraTools           []ExtraTool           // Non-Composio tools (e.g. Apify search)
+	DescriptionOverrides map[string]string     // localName → custom description (overrides Composio's generic text)
 }
 
 // ComposioAdapter implements PlatformAdapter using Composio as the backend.
@@ -57,7 +58,8 @@ func NewComposioAdapter(client *composio.Client, config ComposioAdapterConfig) *
 // NewDynamicComposioAdapter discovers tools via the v3 API at startup.
 // Uses tags=important for platforms with curated tools, falls back to all tools otherwise.
 // Each tool is fetched individually to resolve the latest version.
-func NewDynamicComposioAdapter(ctx context.Context, client *composio.Client, platform, displayName, authConfigID, appName string, excludeTools ...string) (*ComposioAdapter, error) {
+// descOverrides maps localName → custom description (overrides Composio's generic text).
+func NewDynamicComposioAdapter(ctx context.Context, client *composio.Client, platform, displayName, authConfigID, appName string, descOverrides map[string]string, excludeTools ...string) (*ComposioAdapter, error) {
 	listed, err := client.ListToolsV3(ctx, appName, true)
 	if err != nil {
 		return nil, fmt.Errorf("list %s tools: %w", appName, err)
@@ -161,11 +163,12 @@ func NewDynamicComposioAdapter(ctx context.Context, client *composio.Client, pla
 	log.Printf("[Composio] Discovered %d tools for %s (latest versions)", len(tools), displayName)
 
 	return NewComposioAdapter(client, ComposioAdapterConfig{
-		Platform:     platform,
-		DisplayName_: displayName,
-		AuthConfigID: authConfigID,
-		AppName:      appName,
-		Tools_:       tools,
+		Platform:             platform,
+		DisplayName_:         displayName,
+		AuthConfigID:         authConfigID,
+		AppName:              appName,
+		Tools_:               tools,
+		DescriptionOverrides: descOverrides,
 	}), nil
 }
 
@@ -185,12 +188,17 @@ func (a *ComposioAdapter) AddExtraTool(t ExtraTool) {
 }
 
 // Tools returns MCP tool definitions prefixed with the platform name.
+// DescriptionOverrides take priority over Composio's generic descriptions.
 func (a *ComposioAdapter) Tools() []mcp.Tool {
 	tools := make([]mcp.Tool, 0, len(a.config.Tools_)+len(a.config.ExtraTools))
 	for _, t := range a.config.Tools_ {
+		desc := t.Description
+		if override, ok := a.config.DescriptionOverrides[t.LocalName]; ok {
+			desc = override
+		}
 		tools = append(tools, mcp.Tool{
 			Name:        fmt.Sprintf("%s_%s", a.config.Platform, t.LocalName),
-			Description: t.Description,
+			Description: desc,
 			InputSchema: t.InputSchema,
 		})
 	}
