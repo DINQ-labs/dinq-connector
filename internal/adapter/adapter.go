@@ -15,11 +15,12 @@ import (
 type AuthScheme string
 
 const (
-	AuthOAuth2   AuthScheme = "oauth2"
-	AuthAPIKey   AuthScheme = "api_key"
-	AuthBearer   AuthScheme = "bearer"
-	AuthComposio AuthScheme = "composio"  // OAuth managed by Composio
-	AuthBotToken AuthScheme = "bot_token" // Server-side bot token, no per-user OAuth
+	AuthOAuth2       AuthScheme = "oauth2"
+	AuthAPIKey       AuthScheme = "api_key"
+	AuthBearer       AuthScheme = "bearer"
+	AuthComposio     AuthScheme = "composio"      // OAuth managed by Composio
+	AuthBotToken     AuthScheme = "bot_token"     // Server-side bot token, no per-user OAuth
+	AuthDinqInternal AuthScheme = "dinq_internal" // Dinq-native — pass user_id directly, no OAuth
 )
 
 // OAuthConfig holds the OAuth2 configuration for a platform.

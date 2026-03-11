@@ -44,15 +44,25 @@ func (a *Adapter) OAuthConfig() *adapter.OAuthConfig {
 func (a *Adapter) Tools() []mcp.Tool {
 	tools := []mcp.Tool{
 		mcp.NewTool("twitter_create_tweet",
-			mcp.WithDescription("Post a new tweet. Free tier limit: 500 tweets/month per user."),
+			mcp.WithDescription(
+				"[WRITE — confirm before calling] Post a tweet on behalf of the user. "+
+					"This is public and visible immediately. Confirm the exact text before calling. "+
+					"Free tier limit: 500 tweets/month per user.",
+			),
 			mcp.WithString("text", mcp.Required(), mcp.Description("Tweet text (max 280 characters)")),
 		),
 		mcp.NewTool("twitter_delete_tweet",
-			mcp.WithDescription("Delete a tweet by its ID."),
+			mcp.WithDescription(
+				"[WRITE — confirm before calling] Permanently delete a tweet by its ID. "+
+					"Confirm the tweet and that the user intends to delete before calling.",
+			),
 			mcp.WithString("tweet_id", mcp.Required(), mcp.Description("The tweet ID to delete")),
 		),
 		mcp.NewTool("twitter_get_me",
-			mcp.WithDescription("Get the authenticated user's Twitter profile (id, name, username, description)."),
+			mcp.WithDescription(
+				"[READ] Get the authenticated user's Twitter profile: id, name, username, bio. "+
+					"Call to get their handle before crafting tweet content, or to confirm their Twitter identity.",
+			),
 		),
 	}
 	for _, t := range a.extraTools {
