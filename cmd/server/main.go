@@ -21,6 +21,8 @@ import (
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/discord_bot"
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/github"
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/gmail"
+	"github.com/DINQ-labs/dinq-connector/internal/adapter/outlook"
+	"github.com/DINQ-labs/dinq-connector/internal/adapter/smtp_email"
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/twitter"
 	"github.com/DINQ-labs/dinq-connector/internal/apify"
 	"github.com/DINQ-labs/dinq-connector/internal/auth"
@@ -62,6 +64,17 @@ func main() {
 		log.Printf("[Registry] Dinq registered (internal auth, server=%s)", dinqServerURL)
 	}
 
+	// Outlook direct OAuth adapter — takes priority over Composio Outlook when configured.
+	useDirectOutlook := os.Getenv("OUTLOOK_CLIENT_ID") != ""
+	if useDirectOutlook {
+		registry.Register(outlook.New())
+		log.Println("[Registry] Outlook registered (direct OAuth 2.0)")
+	}
+
+	// SMTP Email adapter — credentials-based, no OAuth.
+	registry.Register(smtp_email.New())
+	log.Println("[Registry] SMTP Email registered (credentials auth)")
+
 	// Composio-backed adapters (v3 API uses auth_config_id directly, no integration UUIDs needed)
 	if apiKey := os.Getenv("COMPOSIO_API_KEY"); apiKey != "" {
 		cc := composio.NewClient(apiKey)
@@ -92,6 +105,9 @@ func main() {
 				continue
 			}
 			if p.platform == "gmail" && useDirectGmail {
+				continue
+			}
+			if p.platform == "outlook" && useDirectOutlook {
 				continue
 			}
 			authConfigID := os.Getenv(p.envKey)
@@ -146,6 +162,11 @@ func main() {
 	if id := os.Getenv("TWITTER_CLIENT_ID"); id != "" {
 		authMgr.SetConfig("twitter", id, os.Getenv("TWITTER_CLIENT_SECRET"), "tweet.read,tweet.write,users.read,offline.access")
 		log.Println("[Auth] Twitter OAuth configured")
+	}
+
+	if id := os.Getenv("OUTLOOK_CLIENT_ID"); id != "" {
+		authMgr.SetConfig("outlook", id, os.Getenv("OUTLOOK_CLIENT_SECRET"), "Mail.Send Mail.Read User.Read offline_access")
+		log.Println("[Auth] Outlook OAuth configured")
 	}
 
 	// --- HTTP API + MCP on same port ---

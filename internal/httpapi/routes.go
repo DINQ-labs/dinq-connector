@@ -44,6 +44,7 @@ func New(authMgr *auth.Manager, registry *adapter.Registry) *Handler {
 	h.mux.HandleFunc("GET /auth/callback/{platform}", h.handleCallback)
 	h.mux.HandleFunc("GET /auth/composio-callback", h.handleComposioCallback)
 	h.mux.HandleFunc("GET /auth/accounts", h.handleListAccounts)
+	h.mux.HandleFunc("POST /auth/connect-credentials", h.handleConnectCredentials)
 	h.mux.HandleFunc("POST /api/execute", h.handleExecute)
 	return h
 }
@@ -119,6 +120,51 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 	respondOK(w, map[string]string{
 		"redirect_url": redirectURL,
 		"status":       "initiated",
+	})
+}
+
+// POST /auth/connect-credentials — connect a credentials-based platform (e.g. SMTP email).
+// Body: { "user_id": "xxx", "platform": "smtp_email", "credentials": { "email": "...", "password": "...", "smtp_host": "...", "smtp_port": 587 } }
+func (h *Handler) handleConnectCredentials(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		UserID      string         `json:"user_id"`
+		Platform    string         `json:"platform"`
+		Credentials map[string]any `json:"credentials"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		respondError(w, codeInvalidRequest, "invalid JSON")
+		return
+	}
+	if body.UserID == "" || body.Platform == "" {
+		respondError(w, codeMissingParam, "user_id and platform are required")
+		return
+	}
+	if body.Credentials == nil {
+		respondError(w, codeMissingParam, "credentials are required")
+		return
+	}
+
+	a := h.registry.Get(body.Platform)
+	if a == nil {
+		respondError(w, codeInvalidParam, "unknown platform: "+body.Platform)
+		return
+	}
+
+	credJSON, _ := json.Marshal(body.Credentials)
+
+	// Extract email for account_email field
+	email, _ := body.Credentials["email"].(string)
+
+	account, err := h.authMgr.SaveCredentials(r.Context(), body.UserID, body.Platform, string(credJSON), email)
+	if err != nil {
+		respondError(w, codeInternalError, err.Error())
+		return
+	}
+
+	respondOK(w, map[string]any{
+		"status":        account.Status,
+		"platform":      account.Platform,
+		"account_email": account.AccountEmail,
 	})
 }
 

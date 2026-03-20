@@ -58,6 +58,9 @@ func (m *Manager) InitiateOAuth(ctx context.Context, userID, platform, callbackU
 		return m.initiateComposioAuth(ctx, a, userID, callbackURL)
 	}
 
+	if a.AuthScheme() == adapter.AuthCredentials {
+		return "", fmt.Errorf("platform %s uses credentials auth — use /auth/connect-credentials instead", platform)
+	}
 	if a.AuthScheme() != adapter.AuthOAuth2 {
 		return "", fmt.Errorf("platform %s does not use OAuth2", platform)
 	}
@@ -301,6 +304,8 @@ func fetchAccountEmail(ctx context.Context, a adapter.PlatformAdapter, accessTok
 		return fetchGoogleEmail(ctx, accessToken)
 	case "github":
 		return fetchGitHubEmail(ctx, accessToken)
+	case "outlook":
+		return fetchOutlookEmail(ctx, accessToken)
 	default:
 		return ""
 	}
@@ -349,6 +354,32 @@ func fetchGitHubEmail(ctx context.Context, token string) string {
 	return info.Email
 }
 
+func fetchOutlookEmail(ctx context.Context, token string) string {
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://graph.microsoft.com/v1.0/me", nil)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != 200 {
+		return ""
+	}
+	defer resp.Body.Close()
+	var info struct {
+		Mail                string `json:"mail"`
+		UserPrincipalName   string `json:"userPrincipalName"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return ""
+	}
+	email := info.Mail
+	if email == "" {
+		email = info.UserPrincipalName
+	}
+	log.Printf("[Auth] Outlook account email: %s", email)
+	return email
+}
+
 func (m *Manager) GetActiveToken(ctx context.Context, userID, platform string) (string, error) {
 	account, err := m.store.GetConnectedAccount(ctx, userID, platform)
 	if err != nil {
@@ -358,9 +389,13 @@ func (m *Manager) GetActiveToken(ctx context.Context, userID, platform string) (
 		return "", fmt.Errorf("account %s/%s is %s", userID, platform, account.Status)
 	}
 
-	// Composio adapters: token is the Composio connectedAccountId, no local refresh needed.
 	a := m.registry.Get(platform)
+	// Composio adapters: token is the Composio connectedAccountId, no local refresh needed.
 	if a != nil && a.AuthScheme() == adapter.AuthComposio {
+		return account.AccessToken, nil
+	}
+	// Credentials adapters: token is the credentials JSON, no refresh needed.
+	if a != nil && a.AuthScheme() == adapter.AuthCredentials {
 		return account.AccessToken, nil
 	}
 
@@ -395,6 +430,34 @@ func (m *Manager) GetActiveToken(ctx context.Context, userID, platform string) (
 	_ = m.store.UpsertConnectedAccount(ctx, account)
 
 	return account.AccessToken, nil
+}
+
+// SaveCredentials stores credentials-based account (no OAuth flow).
+// Used by platforms with AuthCredentials scheme (e.g. SMTP email).
+func (m *Manager) SaveCredentials(ctx context.Context, userID, platform, credentialsJSON, accountEmail string) (*models.ConnectedAccount, error) {
+	a := m.registry.Get(platform)
+	if a == nil {
+		return nil, fmt.Errorf("unknown platform: %s", platform)
+	}
+	if a.AuthScheme() != adapter.AuthCredentials {
+		return nil, fmt.Errorf("platform %s does not use credentials auth", platform)
+	}
+
+	now := time.Now()
+	account := &models.ConnectedAccount{
+		UserID:       userID,
+		Platform:     platform,
+		Status:       models.StatusActive,
+		AccountEmail: accountEmail,
+		AccessToken:  credentialsJSON,
+		TokenType:    "credentials",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := m.store.UpsertConnectedAccount(ctx, account); err != nil {
+		return nil, fmt.Errorf("save account: %w", err)
+	}
+	return account, nil
 }
 
 func (m *Manager) GetAccountStatus(ctx context.Context, userID, platform string) (*models.ConnectedAccount, error) {

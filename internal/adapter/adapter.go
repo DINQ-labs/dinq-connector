@@ -19,8 +19,9 @@ const (
 	AuthAPIKey       AuthScheme = "api_key"
 	AuthBearer       AuthScheme = "bearer"
 	AuthComposio     AuthScheme = "composio"      // OAuth managed by Composio
-	AuthBotToken     AuthScheme = "bot_token"     // Server-side bot token, no per-user OAuth
-	AuthDinqInternal AuthScheme = "dinq_internal" // Dinq-native — pass user_id directly, no OAuth
+	AuthBotToken     AuthScheme = "bot_token"      // Server-side bot token, no per-user OAuth
+	AuthDinqInternal AuthScheme = "dinq_internal"  // Dinq-native — pass user_id directly, no OAuth
+	AuthCredentials  AuthScheme = "credentials"    // User-provided credentials (e.g. SMTP email + password)
 )
 
 // OAuthConfig holds the OAuth2 configuration for a platform.
