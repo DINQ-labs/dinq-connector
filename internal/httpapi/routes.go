@@ -14,6 +14,16 @@ import (
 	"github.com/DINQ-labs/dinq-connector/internal/auth"
 )
 
+// 业务错误码（与 dinq-server 保持一致）
+const (
+	codeSuccess        = 0
+	codeInvalidRequest = 4100
+	codeMissingParam   = 4101
+	codeInvalidParam   = 4102
+	codeNotConnected   = 4200
+	codeInternalError  = 5001
+)
+
 // Handler provides HTTP routes for auth management.
 type Handler struct {
 	authMgr  *auth.Manager
@@ -44,7 +54,7 @@ func (h *Handler) Handler() http.Handler {
 }
 
 func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]string{
+	respondOK(w, map[string]string{
 		"status":  "ok",
 		"service": "dinq-connector",
 		"version": "0.1.0",
@@ -80,7 +90,7 @@ func (h *Handler) handleListPlatforms(w http.ResponseWriter, r *http.Request) {
 		platforms = append(platforms, info)
 	}
 
-	writeJSON(w, 200, map[string]any{"platforms": platforms})
+	respondOK(w, map[string]any{"platforms": platforms})
 }
 
 // POST /auth/connect — initiate OAuth flow.
@@ -92,21 +102,21 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 		CallbackURL string `json:"callback_url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
+		respondError(w, codeInvalidRequest, "invalid JSON")
 		return
 	}
 	if body.UserID == "" || body.Platform == "" {
-		writeJSON(w, 400, map[string]string{"error": "user_id and platform are required"})
+		respondError(w, codeMissingParam, "user_id and platform are required")
 		return
 	}
 
 	redirectURL, err := h.authMgr.InitiateOAuth(r.Context(), body.UserID, body.Platform, body.CallbackURL)
 	if err != nil {
-		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		respondError(w, codeInvalidParam, err.Error())
 		return
 	}
 
-	writeJSON(w, 200, map[string]string{
+	respondOK(w, map[string]string{
 		"redirect_url": redirectURL,
 		"status":       "initiated",
 	})
@@ -191,17 +201,17 @@ func (h *Handler) handleComposioCallback(w http.ResponseWriter, r *http.Request)
 func (h *Handler) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 	userID := r.URL.Query().Get("user_id")
 	if userID == "" {
-		writeJSON(w, 400, map[string]string{"error": "user_id is required"})
+		respondError(w, codeMissingParam, "user_id is required")
 		return
 	}
 
 	accounts, err := h.authMgr.ListAccounts(r.Context(), userID)
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		respondError(w, codeInternalError, err.Error())
 		return
 	}
 
-	writeJSON(w, 200, map[string]any{"accounts": accounts})
+	respondOK(w, map[string]any{"accounts": accounts})
 }
 
 // POST /api/execute — execute a platform tool on behalf of a user.
@@ -215,30 +225,30 @@ func (h *Handler) handleExecute(w http.ResponseWriter, r *http.Request) {
 		Params   map[string]any `json:"params"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
+		respondError(w, codeInvalidRequest, "invalid JSON")
 		return
 	}
 	if body.UserID == "" || body.Platform == "" || body.Action == "" {
-		writeJSON(w, 400, map[string]string{"error": "user_id, platform, and action are required"})
+		respondError(w, codeMissingParam, "user_id, platform, and action are required")
 		return
 	}
 
 	a := h.registry.Get(body.Platform)
 	if a == nil {
-		writeJSON(w, 400, map[string]string{"error": "unknown platform: " + body.Platform})
+		respondError(w, codeInvalidParam, "unknown platform: "+body.Platform)
 		return
 	}
 
 	// Get user's access token
 	token, err := h.authMgr.GetActiveToken(r.Context(), body.UserID, body.Platform)
 	if err != nil {
-		writeJSON(w, 401, map[string]string{"error": "user not connected: " + err.Error()})
+		respondError(w, codeNotConnected, "user not connected: "+err.Error())
 		return
 	}
 
 	result, err := a.Execute(r.Context(), body.Action, body.Params, token, body.UserID)
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		respondError(w, codeInternalError, err.Error())
 		return
 	}
 
@@ -255,23 +265,40 @@ func (h *Handler) handleExecute(w http.ResponseWriter, r *http.Request) {
 		content = string(data)
 	}
 
+	if result.IsError {
+		respondError(w, codeInternalError, content)
+		return
+	}
+
 	// Try to parse content as JSON for clean output
 	var jsonResult json.RawMessage
 	if err := json.Unmarshal([]byte(content), &jsonResult); err == nil {
-		writeJSON(w, 200, map[string]any{
-			"success": !result.IsError,
-			"result":  jsonResult,
-		})
+		respondOK(w, jsonResult)
 	} else {
-		writeJSON(w, 200, map[string]any{
-			"success": !result.IsError,
-			"result":  content,
-		})
+		respondOK(w, content)
 	}
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
+// --- Response helpers (unified {code, data, message} format) ---
+
+func respondOK(w http.ResponseWriter, data any) {
+	writeJSON(w, map[string]any{
+		"code":    codeSuccess,
+		"data":    data,
+		"message": "success",
+	})
+}
+
+func respondError(w http.ResponseWriter, code int, message string) {
+	writeJSON(w, map[string]any{
+		"code":    code,
+		"data":    nil,
+		"message": message,
+	})
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(v)
 }
