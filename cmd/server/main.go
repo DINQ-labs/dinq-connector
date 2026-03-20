@@ -20,6 +20,7 @@ import (
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/dinq"
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/discord_bot"
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/github"
+	"github.com/DINQ-labs/dinq-connector/internal/adapter/gmail"
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/twitter"
 	"github.com/DINQ-labs/dinq-connector/internal/apify"
 	"github.com/DINQ-labs/dinq-connector/internal/auth"
@@ -46,6 +47,13 @@ func main() {
 	// --- Adapter Registry ---
 	registry := adapter.NewRegistry()
 	registry.Register(github.New())
+
+	// Gmail direct OAuth adapter — takes priority over Composio Gmail when configured.
+	useDirectGmail := os.Getenv("GMAIL_CLIENT_ID") != ""
+	if useDirectGmail {
+		registry.Register(gmail.New())
+		log.Println("[Registry] Gmail registered (direct OAuth 2.0)")
+	}
 
 	// Dinq platform adapter — always available, no OAuth needed.
 	// Uses X-User-ID header to call dinq-server internal APIs on behalf of the user.
@@ -81,6 +89,9 @@ func main() {
 		discordBotToken := os.Getenv("DISCORD_BOT_TOKEN")
 		for _, p := range dynamicPlatforms {
 			if p.platform == "discord" && discordBotToken != "" {
+				continue
+			}
+			if p.platform == "gmail" && useDirectGmail {
 				continue
 			}
 			authConfigID := os.Getenv(p.envKey)
@@ -124,6 +135,12 @@ func main() {
 	if id := os.Getenv("GITHUB_CLIENT_ID"); id != "" {
 		authMgr.SetConfig("github", id, os.Getenv("GITHUB_CLIENT_SECRET"), "repo,read:user,read:org")
 		log.Println("[Auth] GitHub OAuth configured")
+	}
+
+	if id := os.Getenv("GMAIL_CLIENT_ID"); id != "" {
+		authMgr.SetConfig("gmail", id, os.Getenv("GMAIL_CLIENT_SECRET"),
+			"https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send openid email")
+		log.Println("[Auth] Gmail OAuth configured")
 	}
 
 	if id := os.Getenv("TWITTER_CLIENT_ID"); id != "" {

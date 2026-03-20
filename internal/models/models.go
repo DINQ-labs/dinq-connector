@@ -10,6 +10,7 @@ type ConnectedAccount struct {
 	Platform     string     `json:"platform"`      // "github", "google", "slack", "notion"
 	Status       string     `json:"status"`        // "initiated", "active", "expired", "failed"
 	StatusReason string     `json:"status_reason"` // reason for current status
+	AccountEmail string     `json:"account_email"` // platform account email (e.g. user's Gmail address)
 	AccessToken  string     `json:"-"`             // never expose in JSON
 	RefreshToken string     `json:"-"`
 	TokenType    string     `json:"token_type"`

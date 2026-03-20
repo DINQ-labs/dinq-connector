@@ -25,11 +25,12 @@ const (
 
 // OAuthConfig holds the OAuth2 configuration for a platform.
 type OAuthConfig struct {
-	AuthorizeURL string   // e.g. "https://github.com/login/oauth/authorize"
-	TokenURL     string   // e.g. "https://github.com/login/oauth/access_token"
-	Scopes       []string // e.g. ["repo", "read:user"]
-	PKCE         bool     // requires PKCE (Twitter OAuth 2.0)
-	BasicAuth    bool     // token endpoint requires HTTP Basic Auth (Twitter requires this)
+	AuthorizeURL string            // e.g. "https://github.com/login/oauth/authorize"
+	TokenURL     string            // e.g. "https://github.com/login/oauth/access_token"
+	Scopes       []string          // e.g. ["repo", "read:user"]
+	PKCE         bool              // requires PKCE (Twitter OAuth 2.0)
+	BasicAuth    bool              // token endpoint requires HTTP Basic Auth (Twitter requires this)
+	ExtraParams  map[string]string // extra query params for authorize URL (e.g. access_type=offline for Google)
 	// ClientID and ClientSecret come from env/DB at runtime, not hardcoded here.
 }
 

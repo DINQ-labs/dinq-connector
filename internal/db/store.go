@@ -71,6 +71,7 @@ func (s *Store) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_connected_accounts_user ON connected_accounts(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_connected_accounts_platform ON connected_accounts(user_id, platform)`,
 		`ALTER TABLE pending_auths ADD COLUMN IF NOT EXISTS code_verifier TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE connected_accounts ADD COLUMN IF NOT EXISTS account_email TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, q := range queries {
 		if _, err := s.db.Exec(q); err != nil {
@@ -85,18 +86,19 @@ func (s *Store) migrate() error {
 // UpsertConnectedAccount inserts or updates a connected account (unique on user_id+platform).
 func (s *Store) UpsertConnectedAccount(ctx context.Context, a *models.ConnectedAccount) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO connected_accounts (user_id, platform, status, status_reason, access_token, refresh_token, token_type, scopes, expires_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		INSERT INTO connected_accounts (user_id, platform, status, status_reason, account_email, access_token, refresh_token, token_type, scopes, expires_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		ON CONFLICT (user_id, platform) DO UPDATE SET
 			status = EXCLUDED.status,
 			status_reason = EXCLUDED.status_reason,
+			account_email = EXCLUDED.account_email,
 			access_token = EXCLUDED.access_token,
 			refresh_token = EXCLUDED.refresh_token,
 			token_type = EXCLUDED.token_type,
 			scopes = EXCLUDED.scopes,
 			expires_at = EXCLUDED.expires_at,
 			updated_at = EXCLUDED.updated_at
-	`, a.UserID, a.Platform, a.Status, a.StatusReason, a.AccessToken, a.RefreshToken, a.TokenType, a.Scopes, a.ExpiresAt, a.CreatedAt, a.UpdatedAt)
+	`, a.UserID, a.Platform, a.Status, a.StatusReason, a.AccountEmail, a.AccessToken, a.RefreshToken, a.TokenType, a.Scopes, a.ExpiresAt, a.CreatedAt, a.UpdatedAt)
 	return err
 }
 
@@ -104,11 +106,11 @@ func (s *Store) UpsertConnectedAccount(ctx context.Context, a *models.ConnectedA
 func (s *Store) GetConnectedAccount(ctx context.Context, userID, platform string) (*models.ConnectedAccount, error) {
 	a := &models.ConnectedAccount{}
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, user_id, platform, status, status_reason, access_token, refresh_token, token_type, scopes, expires_at, created_at, updated_at
+		SELECT id, user_id, platform, status, status_reason, account_email, access_token, refresh_token, token_type, scopes, expires_at, created_at, updated_at
 		FROM connected_accounts WHERE user_id = $1 AND platform = $2
 	`, userID, platform).Scan(
 		&a.ID, &a.UserID, &a.Platform, &a.Status, &a.StatusReason,
-		&a.AccessToken, &a.RefreshToken, &a.TokenType, &a.Scopes,
+		&a.AccountEmail, &a.AccessToken, &a.RefreshToken, &a.TokenType, &a.Scopes,
 		&a.ExpiresAt, &a.CreatedAt, &a.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -120,7 +122,7 @@ func (s *Store) GetConnectedAccount(ctx context.Context, userID, platform string
 // ListConnectedAccounts returns all connected accounts for a user.
 func (s *Store) ListConnectedAccounts(ctx context.Context, userID string) ([]*models.ConnectedAccount, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, user_id, platform, status, status_reason, token_type, scopes, expires_at, created_at, updated_at
+		SELECT id, user_id, platform, status, status_reason, account_email, token_type, scopes, expires_at, created_at, updated_at
 		FROM connected_accounts WHERE user_id = $1 ORDER BY platform
 	`, userID)
 	if err != nil {
@@ -131,7 +133,7 @@ func (s *Store) ListConnectedAccounts(ctx context.Context, userID string) ([]*mo
 	var accounts []*models.ConnectedAccount
 	for rows.Next() {
 		a := &models.ConnectedAccount{}
-		if err := rows.Scan(&a.ID, &a.UserID, &a.Platform, &a.Status, &a.StatusReason, &a.TokenType, &a.Scopes, &a.ExpiresAt, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.UserID, &a.Platform, &a.Status, &a.StatusReason, &a.AccountEmail, &a.TokenType, &a.Scopes, &a.ExpiresAt, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, err
 		}
 		accounts = append(accounts, a)

@@ -99,6 +99,10 @@ func (m *Manager) InitiateOAuth(ctx context.Context, userID, platform, callbackU
 		"state":         {state},
 	}
 
+	for k, v := range oauthCfg.ExtraParams {
+		params.Set(k, v)
+	}
+
 	if oauthCfg.PKCE {
 		verifier, err := generateCodeVerifier()
 		if err != nil {
@@ -265,10 +269,14 @@ func (m *Manager) HandleCallback(ctx context.Context, platform, code, state stri
 		expiresAt = &t
 	}
 
+	// Fetch account email if platform provides userinfo (e.g. Google/Gmail with openid scope).
+	accountEmail := fetchAccountEmail(ctx, a, tokenResp.AccessToken)
+
 	account := &models.ConnectedAccount{
 		UserID:       pending.UserID,
 		Platform:     platform,
 		Status:       models.StatusActive,
+		AccountEmail: accountEmail,
 		AccessToken:  tokenResp.AccessToken,
 		RefreshToken: tokenResp.RefreshToken,
 		TokenType:    tokenResp.TokenType,
@@ -283,6 +291,62 @@ func (m *Manager) HandleCallback(ctx context.Context, platform, code, state stri
 	_ = m.store.DeletePendingAuth(ctx, state)
 
 	return account, pending.CallbackURL, nil
+}
+
+// fetchAccountEmail tries to retrieve the user's email from the platform after OAuth.
+// Currently supports Google (Gmail) via the userinfo endpoint.
+func fetchAccountEmail(ctx context.Context, a adapter.PlatformAdapter, accessToken string) string {
+	switch a.Name() {
+	case "gmail":
+		return fetchGoogleEmail(ctx, accessToken)
+	case "github":
+		return fetchGitHubEmail(ctx, accessToken)
+	default:
+		return ""
+	}
+}
+
+func fetchGoogleEmail(ctx context.Context, token string) string {
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://www.googleapis.com/oauth2/v2/userinfo", nil)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != 200 {
+		return ""
+	}
+	defer resp.Body.Close()
+	var info struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return ""
+	}
+	log.Printf("[Auth] Gmail account email: %s", info.Email)
+	return info.Email
+}
+
+func fetchGitHubEmail(ctx context.Context, token string) string {
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user", nil)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != 200 {
+		return ""
+	}
+	defer resp.Body.Close()
+	var info struct {
+		Email string `json:"email"`
+		Login string `json:"login"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return ""
+	}
+	return info.Email
 }
 
 func (m *Manager) GetActiveToken(ctx context.Context, userID, platform string) (string, error) {

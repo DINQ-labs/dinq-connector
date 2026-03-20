@@ -8,6 +8,8 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/mark3labs/mcp-go/mcp"
+
 	"github.com/DINQ-labs/dinq-connector/internal/adapter"
 	"github.com/DINQ-labs/dinq-connector/internal/auth"
 )
@@ -32,6 +34,7 @@ func New(authMgr *auth.Manager, registry *adapter.Registry) *Handler {
 	h.mux.HandleFunc("GET /auth/callback/{platform}", h.handleCallback)
 	h.mux.HandleFunc("GET /auth/composio-callback", h.handleComposioCallback)
 	h.mux.HandleFunc("GET /auth/accounts", h.handleListAccounts)
+	h.mux.HandleFunc("POST /api/execute", h.handleExecute)
 	return h
 }
 
@@ -199,6 +202,72 @@ func (h *Handler) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, 200, map[string]any{"accounts": accounts})
+}
+
+// POST /api/execute — execute a platform tool on behalf of a user.
+// Body: { "user_id": "xxx", "platform": "gmail", "action": "send_email", "params": { ... } }
+// Internal API for service-to-service calls (e.g. dinq-server sending emails via user's Gmail).
+func (h *Handler) handleExecute(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		UserID   string         `json:"user_id"`
+		Platform string         `json:"platform"`
+		Action   string         `json:"action"`
+		Params   map[string]any `json:"params"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if body.UserID == "" || body.Platform == "" || body.Action == "" {
+		writeJSON(w, 400, map[string]string{"error": "user_id, platform, and action are required"})
+		return
+	}
+
+	a := h.registry.Get(body.Platform)
+	if a == nil {
+		writeJSON(w, 400, map[string]string{"error": "unknown platform: " + body.Platform})
+		return
+	}
+
+	// Get user's access token
+	token, err := h.authMgr.GetActiveToken(r.Context(), body.UserID, body.Platform)
+	if err != nil {
+		writeJSON(w, 401, map[string]string{"error": "user not connected: " + err.Error()})
+		return
+	}
+
+	result, err := a.Execute(r.Context(), body.Action, body.Params, token, body.UserID)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Extract text content from MCP result
+	var content string
+	for _, c := range result.Content {
+		if tc, ok := c.(mcp.TextContent); ok {
+			content = tc.Text
+			break
+		}
+	}
+	if content == "" {
+		data, _ := json.Marshal(result.Content)
+		content = string(data)
+	}
+
+	// Try to parse content as JSON for clean output
+	var jsonResult json.RawMessage
+	if err := json.Unmarshal([]byte(content), &jsonResult); err == nil {
+		writeJSON(w, 200, map[string]any{
+			"success": !result.IsError,
+			"result":  jsonResult,
+		})
+	} else {
+		writeJSON(w, 200, map[string]any{
+			"success": !result.IsError,
+			"result":  content,
+		})
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
