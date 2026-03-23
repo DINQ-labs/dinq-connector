@@ -62,9 +62,17 @@ func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// getUserID reads user_id from query param, falling back to X-User-ID header (injected by gateway).
+func getUserID(r *http.Request) string {
+	if uid := r.URL.Query().Get("user_id"); uid != "" {
+		return uid
+	}
+	return r.Header.Get("X-User-ID")
+}
+
 // GET /auth/platforms — list available platforms and their auth status for a user.
 func (h *Handler) handleListPlatforms(w http.ResponseWriter, r *http.Request) {
-	userID := r.URL.Query().Get("user_id")
+	userID := getUserID(r)
 
 	type platformInfo struct {
 		Name        string `json:"name"`
@@ -106,6 +114,9 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 		respondError(w, codeInvalidRequest, "invalid JSON")
 		return
 	}
+	if body.UserID == "" {
+		body.UserID = r.Header.Get("X-User-ID")
+	}
 	if body.UserID == "" || body.Platform == "" {
 		respondError(w, codeMissingParam, "user_id and platform are required")
 		return
@@ -134,6 +145,9 @@ func (h *Handler) handleConnectCredentials(w http.ResponseWriter, r *http.Reques
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		respondError(w, codeInvalidRequest, "invalid JSON")
 		return
+	}
+	if body.UserID == "" {
+		body.UserID = r.Header.Get("X-User-ID")
 	}
 	if body.UserID == "" || body.Platform == "" {
 		respondError(w, codeMissingParam, "user_id and platform are required")
@@ -245,7 +259,7 @@ func (h *Handler) handleComposioCallback(w http.ResponseWriter, r *http.Request)
 
 // GET /auth/accounts?user_id=xxx — list connected accounts for a user.
 func (h *Handler) handleListAccounts(w http.ResponseWriter, r *http.Request) {
-	userID := r.URL.Query().Get("user_id")
+	userID := getUserID(r)
 	if userID == "" {
 		respondError(w, codeMissingParam, "user_id is required")
 		return
