@@ -2,7 +2,7 @@ name: Deploy to Test Server
 
 on:
   push:
-    branches: [main]
+    branches: [dev]
 
 jobs:
   deploy:
@@ -15,5 +15,5 @@ jobs:
           username: root
           key: ${{ secrets.TEST_SERVER_SSH_KEY }}
           script: |
-            cd /home/server/dinq-connector
-            ./deploy.sh up
+            cd /home/server/test
+            bash deploy-test.sh connector
