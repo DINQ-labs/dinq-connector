@@ -608,8 +608,10 @@ func nylasProviderHint(originalPlatform string) string {
 		return "microsoft"
 	case "google", "gmail":
 		return "google"
+	case "imap":
+		return "imap"
 	default:
-		return "" // no hint — show all providers (e.g. for generic "imap")
+		return ""
 	}
 }
 
