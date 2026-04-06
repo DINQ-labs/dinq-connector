@@ -48,7 +48,7 @@ func (m *Manager) SetConfig(platform, clientID, clientSecret, scopes string) {
 	}
 }
 
-func (m *Manager) InitiateOAuth(ctx context.Context, userID, platform, callbackURL string) (string, error) {
+func (m *Manager) InitiateOAuth(ctx context.Context, userID, platform, callbackURL string, hints ...string) (string, error) {
 	a := m.registry.Get(platform)
 	if a == nil {
 		return "", fmt.Errorf("unknown platform: %s", platform)
@@ -107,6 +107,14 @@ func (m *Manager) InitiateOAuth(ctx context.Context, userID, platform, callbackU
 
 	for k, v := range oauthCfg.ExtraParams {
 		params.Set(k, v)
+	}
+
+	// For Nylas: pass provider hint so hosted auth skips the provider selection page.
+	if platform == "nylas" && len(hints) > 0 && hints[0] != "" {
+		nylasProvider := nylasProviderHint(hints[0])
+		if nylasProvider != "" {
+			params.Set("provider", nylasProvider)
+		}
 	}
 
 	if oauthCfg.PKCE {
@@ -590,6 +598,19 @@ func postToken(ctx context.Context, tokenURL, clientID, clientSecret string, bas
 		return nil, fmt.Errorf("parse token: %w", err)
 	}
 	return &result, nil
+}
+
+// nylasProviderHint maps the original platform name to a Nylas provider identifier
+// so the hosted auth page skips provider selection and goes directly to the correct login.
+func nylasProviderHint(originalPlatform string) string {
+	switch originalPlatform {
+	case "microsoft", "outlook":
+		return "microsoft"
+	case "google", "gmail":
+		return "google"
+	default:
+		return "" // no hint — show all providers (e.g. for generic "imap")
+	}
 }
 
 func randomState() (string, error) {

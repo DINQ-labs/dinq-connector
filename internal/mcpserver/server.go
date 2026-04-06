@@ -174,14 +174,15 @@ func (s *Server) handleConnect(ctx context.Context, req mcp.CallToolRequest) (*m
 	platform, _ := args["platform"].(string)
 	callbackURL, _ := args["callback_url"].(string)
 
-	platform = adapter.ResolveName(strings.ToLower(platform))
+	originalPlatform := strings.ToLower(platform)
+	platform = adapter.ResolveName(originalPlatform)
 
 	if userID == "" || platform == "" {
 		return mcp.NewToolResultError("user_id and platform are required"), nil
 	}
 	log.Printf("[MCP] connector_connect user=%s platform=%s", userID, platform)
 
-	redirectURL, err := s.authMgr.InitiateOAuth(ctx, userID, platform, callbackURL)
+	redirectURL, err := s.authMgr.InitiateOAuth(ctx, userID, platform, callbackURL, originalPlatform)
 	if err != nil {
 		return mcp.NewToolResultError("failed to initiate OAuth: " + err.Error()), nil
 	}
