@@ -121,6 +121,7 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 		respondError(w, codeMissingParam, "user_id and platform are required")
 		return
 	}
+	body.Platform = adapter.ResolveName(body.Platform)
 
 	redirectURL, err := h.authMgr.InitiateOAuth(r.Context(), body.UserID, body.Platform, body.CallbackURL)
 	if err != nil {
