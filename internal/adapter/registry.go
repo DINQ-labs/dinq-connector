@@ -34,11 +34,36 @@ func (r *Registry) Register(a PlatformAdapter) {
 	r.adapters[name] = a
 }
 
+// platformAliases maps common alternative names to canonical adapter names.
+// This handles cases where callers (especially LLM agents or frontends)
+// use different names for the same platform.
+var platformAliases = map[string]string{
+	"microsoft": "outlook",
+	"imap":      "nylas",
+}
+
+// ResolveName returns the canonical adapter name for a given input,
+// applying aliases if necessary.
+func ResolveName(name string) string {
+	if canonical, ok := platformAliases[name]; ok {
+		return canonical
+	}
+	return name
+}
+
 // Get returns an adapter by platform name, or nil if not found.
+// Supports aliases (e.g. "microsoft" → "outlook").
 func (r *Registry) Get(name string) PlatformAdapter {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.adapters[name]
+	if a := r.adapters[name]; a != nil {
+		return a
+	}
+	// Try alias
+	if canonical, ok := platformAliases[name]; ok {
+		return r.adapters[canonical]
+	}
+	return nil
 }
 
 // List returns all registered adapters.

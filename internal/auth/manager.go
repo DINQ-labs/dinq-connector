@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -260,7 +261,12 @@ func (m *Manager) HandleCallback(ctx context.Context, platform, code, state stri
 	cfg := m.configs[platform]
 	oauthCfg := a.OAuthConfig()
 
-	tokenResp, err := exchangeCode(ctx, oauthCfg.TokenURL, cfg.ClientID, cfg.ClientSecret, code, m.baseURL+"/auth/callback/"+platform, pending.CodeVerifier, oauthCfg.BasicAuth)
+	var tokenResp *tokenResponse
+	if oauthCfg.JSONTokenExchange {
+		tokenResp, err = exchangeCodeJSON(ctx, oauthCfg, cfg.ClientID, cfg.ClientSecret, code, m.baseURL+"/auth/callback/"+platform)
+	} else {
+		tokenResp, err = exchangeCode(ctx, oauthCfg.TokenURL, cfg.ClientID, cfg.ClientSecret, code, m.baseURL+"/auth/callback/"+platform, pending.CodeVerifier, oauthCfg.BasicAuth)
+	}
 	if err != nil {
 		return nil, "", fmt.Errorf("token exchange: %w", err)
 	}
@@ -272,15 +278,25 @@ func (m *Manager) HandleCallback(ctx context.Context, platform, code, state stri
 		expiresAt = &t
 	}
 
+	// For Nylas-style auth, use grant_id as the effective access token.
+	accessToken := tokenResp.AccessToken
+	if oauthCfg.GrantIDField != "" && tokenResp.GrantID != "" {
+		accessToken = tokenResp.GrantID
+	}
+
 	// Fetch account email if platform provides userinfo (e.g. Google/Gmail with openid scope).
 	accountEmail := fetchAccountEmail(ctx, a, tokenResp.AccessToken)
+	// For Nylas, the email comes from the token response.
+	if accountEmail == "" && tokenResp.Email != "" {
+		accountEmail = tokenResp.Email
+	}
 
 	account := &models.ConnectedAccount{
 		UserID:       pending.UserID,
 		Platform:     platform,
 		Status:       models.StatusActive,
 		AccountEmail: accountEmail,
-		AccessToken:  tokenResp.AccessToken,
+		AccessToken:  accessToken,
 		RefreshToken: tokenResp.RefreshToken,
 		TokenType:    tokenResp.TokenType,
 		Scopes:       cfg.Scopes,
@@ -475,6 +491,8 @@ type tokenResponse struct {
 	RefreshToken string `json:"refresh_token"`
 	TokenType    string `json:"token_type"`
 	ExpiresIn    int    `json:"expires_in"`
+	GrantID      string `json:"grant_id"` // Nylas: the grant identifier used in API paths
+	Email        string `json:"email"`    // Nylas: the authenticated user's email
 }
 
 func exchangeCode(ctx context.Context, tokenURL, clientID, clientSecret, code, redirectURI, codeVerifier string, basicAuth bool) (*tokenResponse, error) {
@@ -491,6 +509,46 @@ func exchangeCode(ctx context.Context, tokenURL, clientID, clientSecret, code, r
 		data.Set("code_verifier", codeVerifier)
 	}
 	return postToken(ctx, tokenURL, clientID, clientSecret, basicAuth, data)
+}
+
+// exchangeCodeJSON performs a JSON-body token exchange (used by Nylas).
+func exchangeCodeJSON(ctx context.Context, oauthCfg *adapter.OAuthConfig, clientID, clientSecret, code, redirectURI string) (*tokenResponse, error) {
+	body := map[string]string{
+		"grant_type":    "authorization_code",
+		"client_id":     clientID,
+		"client_secret": clientSecret,
+		"code":          code,
+		"redirect_uri":  redirectURI,
+	}
+	for k, v := range oauthCfg.TokenExchangeExtra {
+		body[k] = v
+	}
+
+	jsonData, _ := json.Marshal(body)
+	req, err := http.NewRequestWithContext(ctx, "POST", oauthCfg.TokenURL, bytes.NewReader(jsonData))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("token exchange failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var tokenResp tokenResponse
+	if err := json.Unmarshal(respBody, &tokenResp); err != nil {
+		return nil, fmt.Errorf("parse token response: %w (body: %s)", err, string(respBody))
+	}
+	log.Printf("[Auth] JSON token exchange: grant_id=%s email=%s", tokenResp.GrantID, tokenResp.Email)
+	return &tokenResp, nil
 }
 
 func refreshToken(ctx context.Context, tokenURL, clientID, clientSecret, refreshTok string, basicAuth bool) (*tokenResponse, error) {

@@ -174,7 +174,7 @@ func (s *Server) handleConnect(ctx context.Context, req mcp.CallToolRequest) (*m
 	platform, _ := args["platform"].(string)
 	callbackURL, _ := args["callback_url"].(string)
 
-	platform = strings.ToLower(platform)
+	platform = adapter.ResolveName(strings.ToLower(platform))
 
 	if userID == "" || platform == "" {
 		return mcp.NewToolResultError("user_id and platform are required"), nil
@@ -209,7 +209,7 @@ type toolInfo struct {
 // handleDiscoverTools returns available actions for a platform with schemas.
 func (s *Server) handleDiscoverTools(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	platform, _ := req.GetArguments()["platform"].(string)
-	platform = strings.ToLower(platform)
+	platform = adapter.ResolveName(strings.ToLower(platform))
 
 	if platform == "" {
 		return mcp.NewToolResultError("platform is required"), nil
@@ -272,7 +272,7 @@ func (s *Server) handleExecute(ctx context.Context, req mcp.CallToolRequest) (*m
 	platform, _ := args["platform"].(string)
 	action, _ := args["action"].(string)
 
-	platform = strings.ToLower(platform)
+	platform = adapter.ResolveName(strings.ToLower(platform))
 
 	if userID == "" || platform == "" || action == "" {
 		return mcp.NewToolResultError("user_id, platform, and action are required"), nil

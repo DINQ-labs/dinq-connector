@@ -32,6 +32,12 @@ type OAuthConfig struct {
 	PKCE         bool              // requires PKCE (Twitter OAuth 2.0)
 	BasicAuth    bool              // token endpoint requires HTTP Basic Auth (Twitter requires this)
 	ExtraParams  map[string]string // extra query params for authorize URL (e.g. access_type=offline for Google)
+
+	// Nylas-style token exchange: JSON body instead of form-encoded, and
+	// the response may use a different field for the effective token.
+	JSONTokenExchange  bool              // send token exchange as JSON instead of form-encoded
+	TokenExchangeExtra map[string]string // extra fields to include in token exchange body
+	GrantIDField       string            // if set, use this response field as access_token (e.g. "grant_id")
 	// ClientID and ClientSecret come from env/DB at runtime, not hardcoded here.
 }
 

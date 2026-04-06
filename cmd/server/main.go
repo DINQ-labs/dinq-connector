@@ -22,7 +22,7 @@ import (
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/github"
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/gmail"
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/outlook"
-	"github.com/DINQ-labs/dinq-connector/internal/adapter/smtp_email"
+	"github.com/DINQ-labs/dinq-connector/internal/adapter/nylas"
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/twitter"
 	"github.com/DINQ-labs/dinq-connector/internal/apify"
 	"github.com/DINQ-labs/dinq-connector/internal/auth"
@@ -71,9 +71,11 @@ func main() {
 		log.Println("[Registry] Outlook registered (direct OAuth 2.0)")
 	}
 
-	// SMTP Email adapter — credentials-based, no OAuth.
-	registry.Register(smtp_email.New())
-	log.Println("[Registry] SMTP Email registered (credentials auth)")
+	// Nylas email adapter — OAuth via Nylas hosted auth, supports any IMAP/SMTP provider.
+	if nylasAPIKey := os.Getenv("NYLAS_API_KEY"); nylasAPIKey != "" {
+		registry.Register(nylas.New(nylasAPIKey))
+		log.Println("[Registry] Nylas registered (hosted OAuth, IMAP/SMTP via Nylas API)")
+	}
 
 	// Composio-backed adapters (v3 API uses auth_config_id directly, no integration UUIDs needed)
 	if apiKey := os.Getenv("COMPOSIO_API_KEY"); apiKey != "" {
@@ -167,6 +169,11 @@ func main() {
 	if id := os.Getenv("OUTLOOK_CLIENT_ID"); id != "" {
 		authMgr.SetConfig("outlook", id, os.Getenv("OUTLOOK_CLIENT_SECRET"), "Mail.Send Mail.Read User.Read offline_access")
 		log.Println("[Auth] Outlook OAuth configured")
+	}
+
+	if id := os.Getenv("NYLAS_CLIENT_ID"); id != "" {
+		authMgr.SetConfig("nylas", id, os.Getenv("NYLAS_API_KEY"), "")
+		log.Println("[Auth] Nylas OAuth configured")
 	}
 
 	// --- HTTP API + MCP on same port ---

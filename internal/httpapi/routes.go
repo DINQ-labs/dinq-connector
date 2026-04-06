@@ -149,6 +149,7 @@ func (h *Handler) handleConnectCredentials(w http.ResponseWriter, r *http.Reques
 	if body.UserID == "" {
 		body.UserID = r.Header.Get("X-User-ID")
 	}
+	body.Platform = adapter.ResolveName(body.Platform)
 	if body.UserID == "" || body.Platform == "" {
 		respondError(w, codeMissingParam, "user_id and platform are required")
 		return
@@ -288,6 +289,7 @@ func (h *Handler) handleExecute(w http.ResponseWriter, r *http.Request) {
 		respondError(w, codeInvalidRequest, "invalid JSON")
 		return
 	}
+	body.Platform = adapter.ResolveName(body.Platform)
 	if body.UserID == "" || body.Platform == "" || body.Action == "" {
 		respondError(w, codeMissingParam, "user_id, platform, and action are required")
 		return
