@@ -38,7 +38,8 @@ func (r *Registry) Register(a PlatformAdapter) {
 // This handles cases where callers (especially LLM agents or frontends)
 // use different names for the same platform.
 var platformAliases = map[string]string{
-	"microsoft": "outlook",
+	"microsoft": "nylas",
+	"outlook":   "nylas",
 	"imap":      "nylas",
 }
 
