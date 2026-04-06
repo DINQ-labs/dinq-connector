@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -20,8 +21,9 @@ const (
 	codeInvalidRequest = 4100
 	codeMissingParam   = 4101
 	codeInvalidParam   = 4102
-	codeNotConnected   = 4200
-	codeInternalError  = 5001
+	codeNotConnected    = 4200
+	codeAccountExpired  = 4201
+	codeInternalError   = 5001
 )
 
 // Handler provides HTTP routes for auth management.
@@ -306,7 +308,12 @@ func (h *Handler) handleExecute(w http.ResponseWriter, r *http.Request) {
 	// Get user's access token
 	token, err := h.authMgr.GetActiveToken(r.Context(), body.UserID, body.Platform)
 	if err != nil {
-		respondError(w, codeNotConnected, "user not connected: "+err.Error())
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "expired") {
+			respondError(w, codeAccountExpired, "account expired, please reconnect: "+errMsg)
+		} else {
+			respondError(w, codeNotConnected, "user not connected: "+errMsg)
+		}
 		return
 	}
 
