@@ -99,8 +99,10 @@ func (m *Manager) InitiateOAuth(ctx context.Context, userID, platform, callbackU
 		"response_type": {"code"},
 		"client_id":     {cfg.ClientID},
 		"redirect_uri":  {m.baseURL + "/auth/callback/" + platform},
-		"scope":         {scopes},
 		"state":         {state},
+	}
+	if scopes != "" {
+		params.Set("scope", scopes)
 	}
 
 	for k, v := range oauthCfg.ExtraParams {
