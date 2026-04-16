@@ -119,6 +119,18 @@ func (s *Store) GetConnectedAccount(ctx context.Context, userID, platform string
 	return a, err
 }
 
+// DeleteConnectedAccount 删除某个用户的已连接账号（按主键 id），并校验归属
+func (s *Store) DeleteConnectedAccount(ctx context.Context, userID, id string) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `
+		DELETE FROM connected_accounts WHERE id = $1 AND user_id = $2
+	`, id, userID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := result.RowsAffected()
+	return n > 0, nil
+}
+
 // ListConnectedAccounts returns all connected accounts for a user.
 func (s *Store) ListConnectedAccounts(ctx context.Context, userID string) ([]*models.ConnectedAccount, error) {
 	rows, err := s.db.QueryContext(ctx, `

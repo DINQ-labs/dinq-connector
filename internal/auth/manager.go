@@ -494,6 +494,11 @@ func (m *Manager) ListAccounts(ctx context.Context, userID string) ([]*models.Co
 	return m.store.ListConnectedAccounts(ctx, userID)
 }
 
+// DeleteAccount 删除指定账号（按主键 id），校验归属
+func (m *Manager) DeleteAccount(ctx context.Context, userID, id string) (bool, error) {
+	return m.store.DeleteConnectedAccount(ctx, userID, id)
+}
+
 // --- OAuth helpers ---
 
 type tokenResponse struct {

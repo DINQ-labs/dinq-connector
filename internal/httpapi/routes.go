@@ -46,6 +46,7 @@ func New(authMgr *auth.Manager, registry *adapter.Registry) *Handler {
 	h.mux.HandleFunc("GET /auth/callback/{platform}", h.handleCallback)
 	h.mux.HandleFunc("GET /auth/composio-callback", h.handleComposioCallback)
 	h.mux.HandleFunc("GET /auth/accounts", h.handleListAccounts)
+	h.mux.HandleFunc("DELETE /auth/accounts/{id}", h.handleDeleteAccount)
 	h.mux.HandleFunc("POST /auth/connect-credentials", h.handleConnectCredentials)
 	h.mux.HandleFunc("POST /api/execute", h.handleExecute)
 	return h
@@ -277,6 +278,31 @@ func (h *Handler) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondOK(w, map[string]any{"accounts": accounts})
+}
+
+// DELETE /auth/accounts/{id} — delete a connected account.
+func (h *Handler) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	if userID == "" {
+		respondError(w, codeMissingParam, "user_id is required")
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		respondError(w, codeMissingParam, "id is required")
+		return
+	}
+
+	ok, err := h.authMgr.DeleteAccount(r.Context(), userID, id)
+	if err != nil {
+		respondError(w, codeInternalError, err.Error())
+		return
+	}
+	if !ok {
+		respondError(w, codeNotConnected, "account not found")
+		return
+	}
+	respondOK(w, map[string]any{"ok": true})
 }
 
 // POST /api/execute — execute a platform tool on behalf of a user.
