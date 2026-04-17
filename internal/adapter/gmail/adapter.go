@@ -57,6 +57,8 @@ func (a *Adapter) Tools() []mcp.Tool {
 			mcp.WithString("body", mcp.Required(), mcp.Description("Email body in plain text")),
 			mcp.WithString("cc", mcp.Description("CC recipients, comma-separated")),
 			mcp.WithString("bcc", mcp.Description("BCC recipients, comma-separated")),
+			mcp.WithString("from_name", mcp.Description("Optional sender display name; MIME From will be formatted as \"Name\" <email>. Requires from_email.")),
+			mcp.WithString("from_email", mcp.Description("Optional sender email; must match the authenticated Gmail account or an allowed send-as alias.")),
 		),
 		mcp.NewTool("gmail_list_messages",
 			mcp.WithDescription(
@@ -160,8 +162,10 @@ func (a *Adapter) sendEmail(ctx context.Context, args map[string]any, token stri
 	body := argStr(args, "body")
 	cc := argStr(args, "cc")
 	bcc := argStr(args, "bcc")
+	fromName := argStr(args, "from_name")
+	fromEmail := argStr(args, "from_email")
 
-	raw := buildMIME(to, cc, bcc, subject, body)
+	raw := buildMIME(to, cc, bcc, subject, body, fromName, fromEmail)
 	payload := map[string]any{"raw": raw}
 
 	data, err := gmailPost(ctx, "/messages/send", payload, token)
@@ -356,7 +360,7 @@ func (a *Adapter) createDraft(ctx context.Context, args map[string]any, token st
 	body := argStr(args, "body")
 	cc := argStr(args, "cc")
 
-	raw := buildMIME(to, cc, "", subject, body)
+	raw := buildMIME(to, cc, "", subject, body, argStr(args, "from_name"), argStr(args, "from_email"))
 	payload := map[string]any{
 		"message": map[string]any{"raw": raw},
 	}
@@ -407,8 +411,17 @@ func (a *Adapter) modifyLabels(ctx context.Context, args map[string]any, token s
 
 // --- MIME builder ---
 
-func buildMIME(to, cc, bcc, subject, body string) string {
+func buildMIME(to, cc, bcc, subject, body, fromName, fromEmail string) string {
 	var mime strings.Builder
+	if fromEmail != "" {
+		// RFC 5322: "Display Name" <email@domain>. Gmail API only honors From when it
+		// matches the authenticated account (or a configured send-as alias).
+		if fromName != "" {
+			mime.WriteString(fmt.Sprintf("From: %q <%s>\r\n", fromName, fromEmail))
+		} else {
+			mime.WriteString("From: " + fromEmail + "\r\n")
+		}
+	}
 	mime.WriteString("To: " + to + "\r\n")
 	if cc != "" {
 		mime.WriteString("Cc: " + cc + "\r\n")
