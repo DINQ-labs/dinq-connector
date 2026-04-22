@@ -19,28 +19,47 @@ import (
 const apiBase = "https://api.us.nylas.com/v3"
 
 // Adapter implements adapter.PlatformAdapter for Nylas-backed email.
+// The adapter can register itself under any platform name (e.g. "gmail",
+// "outlook", "nylas") so that the frontend integration stays stable while
+// the underlying provider is delegated to Nylas Hosted OAuth.
 type Adapter struct {
-	apiKey string // Server-side NYLAS_API_KEY for all API calls
+	apiKey       string // Server-side NYLAS_API_KEY for all API calls
+	name         string // platform identifier, e.g. "gmail"
+	displayName  string // human-facing name, e.g. "Gmail"
+	provider     string // optional Nylas provider hint: "google" / "microsoft" / "imap"
 }
 
-// New creates a Nylas adapter with the given server-side API key.
+// New creates a generic Nylas adapter registered as platform "nylas".
+// Provider picker is shown to the user during hosted auth.
 func New(apiKey string) *Adapter {
-	return &Adapter{apiKey: apiKey}
+	return &Adapter{apiKey: apiKey, name: "nylas", displayName: "Email (IMAP)"}
 }
 
-func (a *Adapter) Name() string                   { return "nylas" }
-func (a *Adapter) DisplayName() string            { return "Email (IMAP)" }
+// NewAs creates a Nylas-backed adapter registered under a custom platform
+// name so callers (frontend) can address it as e.g. "gmail" or "outlook"
+// without knowing Nylas is behind it. `provider` pre-selects the provider
+// on the Nylas hosted auth page (e.g. "google" skips the picker).
+func NewAs(name, displayName, provider, apiKey string) *Adapter {
+	return &Adapter{apiKey: apiKey, name: name, displayName: displayName, provider: provider}
+}
+
+func (a *Adapter) Name() string                   { return a.name }
+func (a *Adapter) DisplayName() string            { return a.displayName }
 func (a *Adapter) AuthScheme() adapter.AuthScheme { return adapter.AuthOAuth2 }
 
 func (a *Adapter) OAuthConfig() *adapter.OAuthConfig {
+	extra := map[string]string{
+		"response_type": "code",
+		"access_type":   "online",
+	}
+	if a.provider != "" {
+		extra["provider"] = a.provider
+	}
 	return &adapter.OAuthConfig{
 		AuthorizeURL: apiBase + "/connect/auth",
 		TokenURL:     apiBase + "/connect/token",
 		Scopes:       []string{}, // IMAP doesn't support scopes
-		ExtraParams: map[string]string{
-			"response_type": "code",
-			"access_type":   "online",
-		},
+		ExtraParams:  extra,
 		JSONTokenExchange: true,                   // Nylas requires JSON body for token exchange
 		TokenExchangeExtra: map[string]string{     // Extra fields for token exchange
 			"code_verifier": "nylas",

@@ -50,11 +50,20 @@ func main() {
 	registry := adapter.NewRegistry()
 	registry.Register(github.New())
 
-	// Gmail direct OAuth adapter — takes priority over Composio Gmail when configured.
-	useDirectGmail := os.Getenv("GMAIL_CLIENT_ID") != ""
-	if useDirectGmail {
+	// "gmail" platform backend selection:
+	// - If NYLAS_API_KEY is set → register Nylas-backed adapter under name "gmail"
+	//   (Nylas Hosted Auth is already verified by Google, avoids the "unverified
+	//   app" consent warning shown to users of our direct Google OAuth client).
+	// - Otherwise fall back to direct Gmail OAuth.
+	useDirectGmail := false
+	if nylasAPIKey := os.Getenv("NYLAS_API_KEY"); nylasAPIKey != "" {
+		registry.Register(nylas.NewAs("gmail", "Gmail", "google", nylasAPIKey))
+		log.Println("[Registry] gmail registered (Nylas-backed, hosted OAuth)")
+		useDirectGmail = true // also suppresses Composio Gmail below
+	} else if os.Getenv("GMAIL_CLIENT_ID") != "" {
 		registry.Register(gmail.New())
 		log.Println("[Registry] Gmail registered (direct OAuth 2.0)")
+		useDirectGmail = true
 	}
 
 	// Dinq platform adapter — always available, no OAuth needed.
