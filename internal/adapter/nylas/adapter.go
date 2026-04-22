@@ -61,6 +61,8 @@ func (a *Adapter) Tools() []mcp.Tool {
 			mcp.WithString("body", mcp.Required(), mcp.Description("Email body (HTML supported)")),
 			mcp.WithString("cc", mcp.Description("CC recipients, comma-separated")),
 			mcp.WithString("bcc", mcp.Description("BCC recipients, comma-separated")),
+			mcp.WithString("from_name", mcp.Description("Optional sender display name.")),
+			mcp.WithString("from_email", mcp.Description("Optional sender email; must match the authenticated grant's email.")),
 		),
 		mcp.NewTool("nylas_list_messages",
 			mcp.WithDescription(
@@ -143,6 +145,15 @@ func (a *Adapter) sendEmail(ctx context.Context, args map[string]any, grantID st
 	}
 	if bcc := argStr(args, "bcc"); bcc != "" {
 		payload["bcc"] = parseRecipients(bcc)
+	}
+
+	// Nylas v3: from is an array of participants. Email must match the grant's
+	// authenticated mailbox; name is free-form display name.
+	if fromEmail := argStr(args, "from_email"); fromEmail != "" {
+		payload["from"] = []nylasParticipant{{
+			Name:  argStr(args, "from_name"),
+			Email: fromEmail,
+		}}
 	}
 
 	data, err := a.nylasPost(ctx, grantID, "/messages/send", payload)
