@@ -231,14 +231,27 @@ func (m *Manager) HandleComposioCallback(ctx context.Context, state string) (*mo
 		// The UUID from InitiateConnection is a pending flow ID.
 		// After OAuth, Composio creates a canonical ca_xxx account.
 		// Use ListConnections to find the real connectedAccountId for this user+app.
+		var resolvedConn composio.ConnectedAccount
 		if conns, listErr := cap.ComposioClient().ListConnections(ctx, pending.UserID, cap.ComposioAppName()); listErr == nil && len(conns) > 0 {
 			log.Printf("[Auth] Resolved connectedAccountId: %s -> %s (via ListConnections)", account.AccessToken, conns[0].ID)
 			account.AccessToken = conns[0].ID
+			resolvedConn = conns[0]
 		} else {
 			// Fallback: use conn.ID from GetConnection
 			log.Printf("[Auth] Composio callback: stored=%s conn.ID=%s", account.AccessToken, conn.ID)
 			if conn.ID != "" && conn.ID != account.AccessToken {
 				account.AccessToken = conn.ID
+			}
+			resolvedConn = *conn
+		}
+
+		// Populate account_email from the upstream provider using the raw OAuth
+		// access token returned by Composio. Composio's connected_accounts
+		// response does not include account email directly, so we call the
+		// provider's userinfo endpoint (same path as the direct-OAuth flow).
+		if resolvedConn.Data.AccessToken != "" && account.AccountEmail == "" {
+			if email := fetchAccountEmail(ctx, a, resolvedConn.Data.AccessToken); email != "" {
+				account.AccountEmail = email
 			}
 		}
 	} else {
