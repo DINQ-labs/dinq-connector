@@ -164,8 +164,12 @@ func (a *Adapter) sendEmail(ctx context.Context, args map[string]any, token stri
 	bcc := argStr(args, "bcc")
 	fromName := argStr(args, "from_name")
 	fromEmail := argStr(args, "from_email")
+	attachments, err := parseAttachments(args["attachments"])
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 
-	raw := buildMIME(to, cc, bcc, subject, body, fromName, fromEmail)
+	raw := buildMIME(to, cc, bcc, subject, body, fromName, fromEmail, attachments)
 	payload := map[string]any{"raw": raw}
 
 	data, err := gmailPost(ctx, "/messages/send", payload, token)
@@ -360,7 +364,7 @@ func (a *Adapter) createDraft(ctx context.Context, args map[string]any, token st
 	body := argStr(args, "body")
 	cc := argStr(args, "cc")
 
-	raw := buildMIME(to, cc, "", subject, body, argStr(args, "from_name"), argStr(args, "from_email"))
+	raw := buildMIME(to, cc, "", subject, body, argStr(args, "from_name"), argStr(args, "from_email"), nil)
 	payload := map[string]any{
 		"message": map[string]any{"raw": raw},
 	}
@@ -411,7 +415,58 @@ func (a *Adapter) modifyLabels(ctx context.Context, args map[string]any, token s
 
 // --- MIME builder ---
 
-func buildMIME(to, cc, bcc, subject, body, fromName, fromEmail string) string {
+type emailAttachment struct {
+	Filename    string
+	Content     string
+	ContentType string
+}
+
+func parseAttachments(raw any) ([]emailAttachment, error) {
+	if raw == nil {
+		return nil, nil
+	}
+
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("attachments must be an array")
+	}
+
+	attachments := make([]emailAttachment, 0, len(items))
+	for i, item := range items {
+		obj, ok := item.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("attachment %d must be an object", i+1)
+		}
+
+		attachment := emailAttachment{
+			Filename:    argStr(obj, "filename"),
+			Content:     argStr(obj, "content"),
+			ContentType: argStr(obj, "content_type"),
+		}
+		if attachment.Filename == "" {
+			return nil, fmt.Errorf("attachment %d filename is required", i+1)
+		}
+		if attachment.Content == "" {
+			return nil, fmt.Errorf("attachment %d content is required", i+1)
+		}
+		if attachment.ContentType == "" {
+			attachment.ContentType = "application/octet-stream"
+		}
+		attachment.Content = strings.ReplaceAll(attachment.Content, "\r", "")
+		attachment.Content = strings.ReplaceAll(attachment.Content, "\n", "")
+		if comma := strings.Index(attachment.Content, ","); comma >= 0 && strings.Contains(attachment.Content[:comma], "base64") {
+			attachment.Content = attachment.Content[comma+1:]
+		}
+		if _, err := base64.StdEncoding.DecodeString(attachment.Content); err != nil {
+			return nil, fmt.Errorf("attachment %s content must be base64", attachment.Filename)
+		}
+		attachments = append(attachments, attachment)
+	}
+
+	return attachments, nil
+}
+
+func buildMIME(to, cc, bcc, subject, body, fromName, fromEmail string, attachments []emailAttachment) string {
 	var mime strings.Builder
 	if fromEmail != "" {
 		// RFC 5322: "Display Name" <email@domain>. Gmail API only honors From when it
@@ -430,10 +485,54 @@ func buildMIME(to, cc, bcc, subject, body, fromName, fromEmail string) string {
 		mime.WriteString("Bcc: " + bcc + "\r\n")
 	}
 	mime.WriteString("Subject: " + subject + "\r\n")
-	mime.WriteString("Content-Type: text/plain; charset=\"UTF-8\"\r\n")
+	if len(attachments) == 0 {
+		mime.WriteString("Content-Type: text/plain; charset=\"UTF-8\"\r\n")
+		mime.WriteString("\r\n")
+		mime.WriteString(body)
+		return base64.URLEncoding.EncodeToString([]byte(mime.String()))
+	}
+
+	boundary := "dinq-boundary-7f5f3b6f"
+	mime.WriteString(fmt.Sprintf("Content-Type: multipart/mixed; boundary=%q\r\n", boundary))
 	mime.WriteString("\r\n")
-	mime.WriteString(body)
+	mime.WriteString("--" + boundary + "\r\n")
+	mime.WriteString("Content-Type: text/plain; charset=\"UTF-8\"\r\n")
+	mime.WriteString("Content-Transfer-Encoding: 7bit\r\n")
+	mime.WriteString("\r\n")
+	mime.WriteString(body + "\r\n")
+
+	for _, attachment := range attachments {
+		filename := sanitizeHeaderValue(attachment.Filename)
+		contentType := sanitizeHeaderValue(attachment.ContentType)
+		mime.WriteString("--" + boundary + "\r\n")
+		mime.WriteString(fmt.Sprintf("Content-Type: %s; name=%q\r\n", contentType, filename))
+		mime.WriteString("Content-Transfer-Encoding: base64\r\n")
+		mime.WriteString(fmt.Sprintf("Content-Disposition: attachment; filename=%q\r\n", filename))
+		mime.WriteString("\r\n")
+		mime.WriteString(wrapBase64(attachment.Content))
+		mime.WriteString("\r\n")
+	}
+	mime.WriteString("--" + boundary + "--")
 	return base64.URLEncoding.EncodeToString([]byte(mime.String()))
+}
+
+func sanitizeHeaderValue(value string) string {
+	value = strings.ReplaceAll(value, "\r", "")
+	value = strings.ReplaceAll(value, "\n", "")
+	return value
+}
+
+func wrapBase64(value string) string {
+	value = strings.ReplaceAll(value, "\r", "")
+	value = strings.ReplaceAll(value, "\n", "")
+	var b strings.Builder
+	for len(value) > 76 {
+		b.WriteString(value[:76])
+		b.WriteString("\r\n")
+		value = value[76:]
+	}
+	b.WriteString(value)
+	return b.String()
 }
 
 // --- Message parser ---
