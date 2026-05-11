@@ -231,16 +231,31 @@ func (m *Manager) HandleComposioCallback(ctx context.Context, state string) (*mo
 		// The UUID from InitiateConnection is a pending flow ID.
 		// After OAuth, Composio creates a canonical ca_xxx account.
 		// Use ListConnections to find the real connectedAccountId for this user+app.
+		var resolvedConn composio.ConnectedAccount
 		if conns, listErr := cap.ComposioClient().ListConnections(ctx, pending.UserID, cap.ComposioAppName()); listErr == nil && len(conns) > 0 {
 			log.Printf("[Auth] Resolved connectedAccountId: %s -> %s (via ListConnections)", account.AccessToken, conns[0].ID)
 			account.AccessToken = conns[0].ID
+			resolvedConn = conns[0]
 		} else {
 			// Fallback: use conn.ID from GetConnection
 			log.Printf("[Auth] Composio callback: stored=%s conn.ID=%s", account.AccessToken, conn.ID)
 			if conn.ID != "" && conn.ID != account.AccessToken {
 				account.AccessToken = conn.ID
 			}
+			resolvedConn = *conn
 		}
+
+		// Populate account_email. Composio's REST response masks OAuth tokens
+		// (both list and detail endpoints), so we cannot call the provider's
+		// userinfo endpoint ourselves. Instead we use Composio's Execute API,
+		// which performs the call server-side with the real token. This works
+		// for any platform whose Composio toolkit ships a "get profile" tool.
+		if account.AccountEmail == "" {
+			if email := fetchComposioAccountEmail(ctx, cap.ComposioClient(), pending.Platform, pending.UserID); email != "" {
+				account.AccountEmail = email
+			}
+		}
+		_ = resolvedConn // token fields are masked; keep the struct around in case Composio starts returning plaintext
 	} else {
 		account.Status = models.StatusFailed
 		account.StatusReason = fmt.Sprintf("composio connection status: %s", conn.Status)
@@ -403,6 +418,47 @@ func fetchOutlookEmail(ctx context.Context, token string) string {
 		email = info.UserPrincipalName
 	}
 	log.Printf("[Auth] Outlook account email: %s", email)
+	return email
+}
+
+// fetchComposioAccountEmail resolves the authenticated user's email by asking
+// Composio to execute a profile-lookup tool server-side, because Composio
+// masks OAuth tokens in its REST responses and we cannot call providers directly.
+func fetchComposioAccountEmail(ctx context.Context, client *composio.Client, platform, userID string) string {
+	var toolSlug string
+	switch platform {
+	case "gmail":
+		toolSlug = "GMAIL_GET_PROFILE"
+	default:
+		return ""
+	}
+
+	resp, err := client.ExecuteTool(ctx, toolSlug, composio.ExecuteToolRequest{
+		UserID:    userID,
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		log.Printf("[Auth] fetchComposioAccountEmail(%s) exec error: %v", platform, err)
+		return ""
+	}
+	if !resp.Successful {
+		log.Printf("[Auth] fetchComposioAccountEmail(%s) not successful: %s", platform, resp.Error)
+		return ""
+	}
+
+	// Expected shape: { data: { response_data: { emailAddress: "..." } } }
+	dataMap, ok := resp.Data.(map[string]any)
+	if !ok {
+		return ""
+	}
+	rd, ok := dataMap["response_data"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	email, _ := rd["emailAddress"].(string)
+	if email != "" {
+		log.Printf("[Auth] %s account email (via Composio): %s", platform, email)
+	}
 	return email
 }
 

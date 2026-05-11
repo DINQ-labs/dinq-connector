@@ -50,8 +50,14 @@ func main() {
 	registry := adapter.NewRegistry()
 	registry.Register(github.New())
 
-	// Gmail direct OAuth adapter — takes priority over Composio Gmail when configured.
-	useDirectGmail := os.Getenv("GMAIL_CLIENT_ID") != ""
+	// "gmail" platform backend selection:
+	// - Prefer Composio-backed Gmail (see COMPOSIO_GMAIL_AUTH_CONFIG_ID registration
+	//   further below) because it uses Composio's pre-verified Google app, avoiding
+	//   the "unverified app" warning that our own Google OAuth client triggers.
+	// - Only register the direct Gmail adapter when Composio is NOT configured for
+	//   gmail (no COMPOSIO_API_KEY or no COMPOSIO_GMAIL_AUTH_CONFIG_ID).
+	composioGmailReady := os.Getenv("COMPOSIO_API_KEY") != "" && os.Getenv("COMPOSIO_GMAIL_AUTH_CONFIG_ID") != ""
+	useDirectGmail := !composioGmailReady && os.Getenv("GMAIL_CLIENT_ID") != ""
 	if useDirectGmail {
 		registry.Register(gmail.New())
 		log.Println("[Registry] Gmail registered (direct OAuth 2.0)")

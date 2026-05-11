@@ -89,6 +89,14 @@ type ConnectedAccount struct {
 	ID      string `json:"id"`
 	Status  string `json:"status"` // ACTIVE, INITIATED, EXPIRED, FAILED
 	AppName string `json:"appName"`
+	// Data contains the raw OAuth token payload (v3 API). We use id_token
+	// (OIDC JWT) or access_token to resolve the authenticated user's email,
+	// since Composio's response does not expose an account email directly.
+	Data struct {
+		IDToken     string `json:"id_token"`
+		AccessToken string `json:"access_token"`
+		Scope       string `json:"scope"`
+	} `json:"data"`
 }
 
 // GetConnection retrieves a connected account by ID (v3 API).
