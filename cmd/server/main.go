@@ -21,8 +21,9 @@ import (
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/discord_bot"
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/github"
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/gmail"
-	"github.com/DINQ-labs/dinq-connector/internal/adapter/outlook"
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/nylas"
+	"github.com/DINQ-labs/dinq-connector/internal/adapter/outlook"
+	"github.com/DINQ-labs/dinq-connector/internal/adapter/smtp_email"
 	"github.com/DINQ-labs/dinq-connector/internal/adapter/twitter"
 	"github.com/DINQ-labs/dinq-connector/internal/apify"
 	"github.com/DINQ-labs/dinq-connector/internal/auth"
@@ -75,6 +76,20 @@ func main() {
 	if useDirectOutlook {
 		registry.Register(outlook.New())
 		log.Println("[Registry] Outlook registered (direct OAuth 2.0)")
+	}
+
+	// Generic SMTP sending for providers without a dedicated OAuth adapter.
+	// The key is also used by the auth manager to encrypt mailbox passwords.
+	var credentialCipher *auth.CredentialCipher
+	if encryptionKey := os.Getenv("SMTP_CREDENTIALS_ENCRYPTION_KEY"); encryptionKey != "" {
+		credentialCipher, err = auth.NewCredentialCipher(encryptionKey)
+		if err != nil {
+			log.Fatalf("Invalid SMTP credential encryption key: %v", err)
+		}
+		registry.Register(smtpemail.New())
+		log.Println("[Registry] SMTP email registered (credentials, send-only)")
+	} else {
+		log.Println("[Registry] SMTP email disabled: SMTP_CREDENTIALS_ENCRYPTION_KEY is not configured")
 	}
 
 	// Nylas email adapter — OAuth via Nylas hosted auth, supports any IMAP/SMTP provider.
@@ -154,6 +169,9 @@ func main() {
 
 	// --- Auth Manager ---
 	authMgr := auth.NewManager(store, registry, baseURL)
+	if credentialCipher != nil {
+		authMgr.SetCredentialCipher(credentialCipher)
+	}
 
 	// Direct OAuth configs (for non-Composio adapters like GitHub)
 	if id := os.Getenv("GITHUB_CLIENT_ID"); id != "" {

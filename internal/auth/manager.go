@@ -24,10 +24,15 @@ import (
 
 // Manager handles OAuth flows and connected account lifecycle.
 type Manager struct {
-	store    *db.Store
-	registry *adapter.Registry
-	configs  map[string]*models.AuthConfig
-	baseURL  string
+	store            *db.Store
+	registry         *adapter.Registry
+	configs          map[string]*models.AuthConfig
+	baseURL          string
+	credentialCipher *CredentialCipher
+}
+
+func (m *Manager) SetCredentialCipher(cipher *CredentialCipher) {
+	m.credentialCipher = cipher
 }
 
 func NewManager(store *db.Store, registry *adapter.Registry, baseURL string) *Manager {
@@ -407,8 +412,8 @@ func fetchOutlookEmail(ctx context.Context, token string) string {
 	}
 	defer resp.Body.Close()
 	var info struct {
-		Mail                string `json:"mail"`
-		UserPrincipalName   string `json:"userPrincipalName"`
+		Mail              string `json:"mail"`
+		UserPrincipalName string `json:"userPrincipalName"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
 		return ""
@@ -478,7 +483,10 @@ func (m *Manager) GetActiveToken(ctx context.Context, userID, platform string) (
 	}
 	// Credentials adapters: token is the credentials JSON, no refresh needed.
 	if a != nil && a.AuthScheme() == adapter.AuthCredentials {
-		return account.AccessToken, nil
+		if m.credentialCipher == nil {
+			return "", fmt.Errorf("credential encryption is not configured")
+		}
+		return m.credentialCipher.Decrypt(account.AccessToken)
 	}
 
 	if !account.NeedsRefresh() {
@@ -524,6 +532,13 @@ func (m *Manager) SaveCredentials(ctx context.Context, userID, platform, credent
 	if a.AuthScheme() != adapter.AuthCredentials {
 		return nil, fmt.Errorf("platform %s does not use credentials auth", platform)
 	}
+	if m.credentialCipher == nil {
+		return nil, fmt.Errorf("credential encryption is not configured")
+	}
+	encryptedCredentials, err := m.credentialCipher.Encrypt(credentialsJSON)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt credentials: %w", err)
+	}
 
 	now := time.Now()
 	account := &models.ConnectedAccount{
@@ -531,7 +546,7 @@ func (m *Manager) SaveCredentials(ctx context.Context, userID, platform, credent
 		Platform:     platform,
 		Status:       models.StatusActive,
 		AccountEmail: accountEmail,
-		AccessToken:  credentialsJSON,
+		AccessToken:  encryptedCredentials,
 		TokenType:    "credentials",
 		CreatedAt:    now,
 		UpdatedAt:    now,

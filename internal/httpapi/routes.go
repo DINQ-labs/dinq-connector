@@ -21,9 +21,9 @@ const (
 	codeInvalidRequest = 4100
 	codeMissingParam   = 4101
 	codeInvalidParam   = 4102
-	codeNotConnected    = 4200
-	codeAccountExpired  = 4201
-	codeInternalError   = 5001
+	codeNotConnected   = 4200
+	codeAccountExpired = 4201
+	codeInternalError  = 5001
 )
 
 // Handler provides HTTP routes for auth management.
@@ -169,11 +169,22 @@ func (h *Handler) handleConnectCredentials(w http.ResponseWriter, r *http.Reques
 		respondError(w, codeInvalidParam, "unknown platform: "+body.Platform)
 		return
 	}
+	validator, ok := a.(adapter.CredentialsAuthProvider)
+	if !ok {
+		respondError(w, codeInvalidParam, "platform does not support credential connection: "+body.Platform)
+		return
+	}
+	normalized, email, err := validator.ValidateCredentials(r.Context(), body.Credentials)
+	if err != nil {
+		respondError(w, codeInvalidParam, err.Error())
+		return
+	}
 
-	credJSON, _ := json.Marshal(body.Credentials)
-
-	// Extract email for account_email field
-	email, _ := body.Credentials["email"].(string)
+	credJSON, err := json.Marshal(normalized)
+	if err != nil {
+		respondError(w, codeInternalError, "failed to encode credentials")
+		return
+	}
 
 	account, err := h.authMgr.SaveCredentials(r.Context(), body.UserID, body.Platform, string(credJSON), email)
 	if err != nil {
