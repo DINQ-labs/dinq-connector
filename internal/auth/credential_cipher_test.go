@@ -3,7 +3,9 @@ package auth
 import (
 	"bytes"
 	"encoding/base64"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -32,6 +34,41 @@ func TestCredentialCipherRoundTrip(t *testing.T) {
 	}
 	if decrypted != plaintext {
 		t.Fatalf("Decrypt = %q, want %q", decrypted, plaintext)
+	}
+}
+
+func TestCredentialCipherConcurrentUse(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x4b}, 32))
+	cipher, err := NewCredentialCipher(key)
+	if err != nil {
+		t.Fatalf("NewCredentialCipher: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 64)
+	for i := 0; i < 64; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			encrypted, err := cipher.Encrypt("mailbox-secret")
+			if err != nil {
+				errs <- err
+				return
+			}
+			decrypted, err := cipher.Decrypt(encrypted)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if decrypted != "mailbox-secret" {
+				errs <- fmt.Errorf("decrypted value = %q", decrypted)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
 	}
 }
 

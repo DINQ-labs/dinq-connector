@@ -77,15 +77,40 @@ func (a *Adapter) ValidateCredentials(ctx context.Context, raw map[string]any) (
 		return nil, "", err
 	}
 
-	client, err := connect(ctx, creds)
-	if err != nil {
-		return nil, "", fmt.Errorf("SMTP authentication failed: %w", err)
-	}
-	if err := client.Quit(); err != nil {
-		client.Close()
+	if creds.Host != "" {
+		client, err := connect(ctx, creds)
+		if err != nil {
+			return nil, "", fmt.Errorf("SMTP authentication failed: %w", err)
+		}
+		if err := client.Quit(); err != nil {
+			client.Close()
+		}
+		return normalizedCredentials(creds), creds.Email, nil
 	}
 
-	normalized := map[string]any{
+	endpoints, err := discoverSMTPEndpoints(ctx, creds.Email)
+	if err != nil {
+		return nil, "", err
+	}
+	for _, endpoint := range endpoints {
+		candidate := creds
+		candidate.Host = endpoint.Host
+		candidate.Port = endpoint.Port
+		candidate.Security = endpoint.Security
+		client, connectErr := connect(ctx, candidate)
+		if connectErr != nil {
+			continue
+		}
+		if err := client.Quit(); err != nil {
+			client.Close()
+		}
+		return normalizedCredentials(candidate), candidate.Email, nil
+	}
+	return nil, "", fmt.Errorf("unable to connect to this mailbox; check the app password or SMTP authorization code")
+}
+
+func normalizedCredentials(creds credentials) map[string]any {
+	return map[string]any{
 		"email":     creds.Email,
 		"password":  creds.Password,
 		"smtp_host": creds.Host,
@@ -93,7 +118,6 @@ func (a *Adapter) ValidateCredentials(ctx context.Context, raw map[string]any) (
 		"username":  creds.Username,
 		"security":  creds.Security,
 	}
-	return normalized, creds.Email, nil
 }
 
 func (a *Adapter) Execute(ctx context.Context, toolName string, args map[string]any, token, _ string) (*mcp.CallToolResult, error) {
@@ -190,14 +214,20 @@ func parseCredentials(raw map[string]any) (credentials, error) {
 		Username: strings.TrimSpace(argString(raw, "username")),
 		Security: strings.ToLower(strings.TrimSpace(argString(raw, "security"))),
 	}
+	if creds.Username == "" {
+		creds.Username = creds.Email
+	}
+	if err := validateMailboxCredentials(creds); err != nil {
+		return credentials{}, err
+	}
+	if creds.Host == "" {
+		return creds, nil
+	}
 	port, err := intValue(raw["smtp_port"])
 	if err != nil {
 		return credentials{}, fmt.Errorf("smtp_port must be 465 or 587")
 	}
 	creds.Port = port
-	if creds.Username == "" {
-		creds.Username = creds.Email
-	}
 	if creds.Security == "" {
 		if creds.Port == 465 {
 			creds.Security = "ssl"
@@ -211,13 +241,23 @@ func parseCredentials(raw map[string]any) (credentials, error) {
 	return creds, nil
 }
 
-func validateNormalizedCredentials(creds credentials) error {
+func validateMailboxCredentials(creds credentials) error {
 	addr, err := mail.ParseAddress(creds.Email)
 	if err != nil || !strings.EqualFold(addr.Address, creds.Email) {
 		return fmt.Errorf("a valid email is required")
 	}
 	if creds.Password == "" {
 		return fmt.Errorf("password is required; use an app password when the provider supports it")
+	}
+	if creds.Username == "" {
+		return fmt.Errorf("username is required")
+	}
+	return nil
+}
+
+func validateNormalizedCredentials(creds credentials) error {
+	if err := validateMailboxCredentials(creds); err != nil {
+		return err
 	}
 	if creds.Host == "" {
 		return fmt.Errorf("smtp_host is required")
@@ -230,9 +270,6 @@ func validateNormalizedCredentials(creds credentials) error {
 	}
 	if (creds.Port == 465 && creds.Security != "ssl") || (creds.Port == 587 && creds.Security != "starttls") {
 		return fmt.Errorf("security must be ssl for port 465 or starttls for port 587")
-	}
-	if creds.Username == "" {
-		return fmt.Errorf("username is required")
 	}
 	return nil
 }

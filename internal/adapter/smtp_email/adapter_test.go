@@ -40,6 +40,19 @@ func TestParseCredentialsDefaultsStartTLS(t *testing.T) {
 	}
 }
 
+func TestParseCredentialsAllowsAutomaticServerDiscovery(t *testing.T) {
+	creds, err := parseCredentials(map[string]any{
+		"email":    "user@gmail.com",
+		"password": "app-password",
+	})
+	if err != nil {
+		t.Fatalf("parseCredentials: %v", err)
+	}
+	if creds.Host != "" || creds.Port != 0 {
+		t.Fatalf("transport should be discovered later: %#v", creds)
+	}
+}
+
 func TestParseCredentialsRejectsUnsafeConfiguration(t *testing.T) {
 	tests := []map[string]any{
 		{"email": "user@example.com", "password": "x", "smtp_host": "127.0.0.1", "smtp_port": 465},
@@ -83,5 +96,30 @@ func TestIsPublicIP(t *testing.T) {
 	}
 	if !isPublicIP(net.ParseIP("8.8.8.8")) {
 		t.Fatal("public IP rejected")
+	}
+}
+
+func TestKnownSMTPDomainDiscovery(t *testing.T) {
+	endpoints, err := discoverSMTPEndpoints(t.Context(), "user@gmail.com")
+	if err != nil {
+		t.Fatalf("discoverSMTPEndpoints: %v", err)
+	}
+	want := smtpEndpoint{Host: "smtp.gmail.com", Port: 587, Security: "starttls"}
+	if len(endpoints) != 1 || endpoints[0] != want {
+		t.Fatalf("endpoints = %#v, want %#v", endpoints, want)
+	}
+}
+
+func TestMXProviderDiscovery(t *testing.T) {
+	tests := map[string]smtpEndpoint{
+		"aspmx.l.google.com.":                {Host: "smtp.gmail.com", Port: 587, Security: "starttls"},
+		"tenant.mail.protection.outlook.com": {Host: "smtp.office365.com", Port: 587, Security: "starttls"},
+		"mx1.mxhichina.com.":                 {Host: "smtp.qiye.aliyun.com", Port: 465, Security: "ssl"},
+	}
+	for host, want := range tests {
+		got, ok := endpointForMXHost(host)
+		if !ok || got != want {
+			t.Fatalf("endpointForMXHost(%q) = %#v, %v; want %#v", host, got, ok, want)
+		}
 	}
 }
