@@ -12,10 +12,19 @@ func TestConnectedRedirectURLPreservesExistingQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connectedRedirectURL: %v", err)
 	}
-	for _, expected := range []string{"tab=email", "status=connected", "platform=smtp_email"} {
+	for _, expected := range []string{"tab=email", "status=connected", "platform=imap"} {
 		if !strings.Contains(got, expected) {
 			t.Fatalf("redirect URL %q does not contain %q", got, expected)
 		}
+	}
+}
+
+func TestPublicPlatformNamePreservesLegacyEmailContract(t *testing.T) {
+	if got := publicPlatformName("smtp_email"); got != "imap" {
+		t.Fatalf("publicPlatformName(smtp_email) = %q, want imap", got)
+	}
+	if got := publicPlatformName("gmail"); got != "gmail" {
+		t.Fatalf("publicPlatformName(gmail) = %q, want gmail", got)
 	}
 }
 

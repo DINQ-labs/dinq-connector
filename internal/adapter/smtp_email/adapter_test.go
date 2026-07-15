@@ -115,6 +115,7 @@ func TestMXProviderDiscovery(t *testing.T) {
 		"aspmx.l.google.com.":                {Host: "smtp.gmail.com", Port: 587, Security: "starttls"},
 		"tenant.mail.protection.outlook.com": {Host: "smtp.office365.com", Port: 587, Security: "starttls"},
 		"mx1.mxhichina.com.":                 {Host: "smtp.qiye.aliyun.com", Port: 465, Security: "ssl"},
+		"mx1.feishu.cn.":                     {Host: "smtp.feishu.cn", Port: 465, Security: "ssl"},
 	}
 	for host, want := range tests {
 		got, ok := endpointForMXHost(host)

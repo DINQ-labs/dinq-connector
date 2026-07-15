@@ -133,7 +133,7 @@ func (h *Handler) handleListPlatforms(w http.ResponseWriter, r *http.Request) {
 	var platforms []platformInfo
 	for _, a := range h.registry.List() {
 		info := platformInfo{
-			Name:        a.Name(),
+			Name:        publicPlatformName(a.Name()),
 			DisplayName: a.DisplayName(),
 			AuthScheme:  string(a.AuthScheme()),
 		}
@@ -244,7 +244,7 @@ func connectedRedirectURL(callbackURL, platform string) (string, error) {
 	}
 	query := u.Query()
 	query.Set("status", "connected")
-	query.Set("platform", platform)
+	query.Set("platform", publicPlatformName(platform))
 	u.RawQuery = query.Encode()
 	return u.String(), nil
 }
@@ -304,7 +304,7 @@ func (h *Handler) handleConnectCredentials(w http.ResponseWriter, r *http.Reques
 
 	respondOK(w, map[string]any{
 		"status":        account.Status,
-		"platform":      account.Platform,
+		"platform":      publicPlatformName(account.Platform),
 		"account_email": account.AccountEmail,
 	})
 }
@@ -397,8 +397,20 @@ func (h *Handler) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 		respondError(w, codeInternalError, err.Error())
 		return
 	}
+	for _, account := range accounts {
+		account.Platform = publicPlatformName(account.Platform)
+	}
 
 	respondOK(w, map[string]any{"accounts": accounts})
+}
+
+// publicPlatformName preserves the platform contract used by the existing
+// integration UI while storage and execution use the more accurate name.
+func publicPlatformName(platform string) string {
+	if platform == "smtp_email" {
+		return "imap"
+	}
+	return platform
 }
 
 // DELETE /auth/accounts/{id} — delete a connected account.

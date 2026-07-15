@@ -105,6 +105,8 @@ func endpointForMXHost(host string) (smtpEndpoint, bool) {
 		return smtpEndpoint{Host: "smtp.exmail.qq.com", Port: 465, Security: "ssl"}, true
 	case strings.Contains(host, "mxhichina.com"):
 		return smtpEndpoint{Host: "smtp.qiye.aliyun.com", Port: 465, Security: "ssl"}, true
+	case strings.Contains(host, "feishu.cn"):
+		return smtpEndpoint{Host: "smtp.feishu.cn", Port: 465, Security: "ssl"}, true
 	case strings.Contains(host, "zoho.eu"):
 		return smtpEndpoint{Host: "smtp.zoho.eu", Port: 587, Security: "starttls"}, true
 	case strings.Contains(host, "zoho.in"):
