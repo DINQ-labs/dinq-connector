@@ -24,10 +24,15 @@ import (
 
 // Manager handles OAuth flows and connected account lifecycle.
 type Manager struct {
-	store    *db.Store
-	registry *adapter.Registry
-	configs  map[string]*models.AuthConfig
-	baseURL  string
+	store            *db.Store
+	registry         *adapter.Registry
+	configs          map[string]*models.AuthConfig
+	baseURL          string
+	credentialCipher *CredentialCipher
+}
+
+func (m *Manager) SetCredentialCipher(cipher *CredentialCipher) {
+	m.credentialCipher = cipher
 }
 
 func NewManager(store *db.Store, registry *adapter.Registry, baseURL string) *Manager {
@@ -60,7 +65,7 @@ func (m *Manager) InitiateOAuth(ctx context.Context, userID, platform, callbackU
 	}
 
 	if a.AuthScheme() == adapter.AuthCredentials {
-		return "", fmt.Errorf("platform %s uses credentials auth — use /auth/connect-credentials instead", platform)
+		return m.initiateCredentialsAuth(ctx, userID, platform, callbackURL)
 	}
 	if a.AuthScheme() != adapter.AuthOAuth2 {
 		return "", fmt.Errorf("platform %s does not use OAuth2", platform)
@@ -132,6 +137,67 @@ func (m *Manager) InitiateOAuth(ctx context.Context, userID, platform, callbackU
 	}
 
 	return oauthCfg.AuthorizeURL + "?" + params.Encode(), nil
+}
+
+func (m *Manager) initiateCredentialsAuth(ctx context.Context, userID, platform, callbackURL string) (string, error) {
+	state, err := randomState()
+	if err != nil {
+		return "", fmt.Errorf("generate state: %w", err)
+	}
+	pending := &models.PendingAuth{
+		State:       state,
+		UserID:      userID,
+		Platform:    platform,
+		CallbackURL: callbackURL,
+		CreatedAt:   time.Now(),
+		ExpiresAt:   time.Now().Add(10 * time.Minute),
+	}
+	if err := m.store.SavePendingAuth(ctx, pending); err != nil {
+		return "", fmt.Errorf("save pending auth: %w", err)
+	}
+	return m.baseURL + "/auth/credentials/" + url.PathEscape(platform) + "?state=" + url.QueryEscape(state), nil
+}
+
+func (m *Manager) GetPendingCredentials(ctx context.Context, platform, state string) (*models.PendingAuth, error) {
+	pending, err := m.store.GetPendingAuth(ctx, state)
+	if err != nil || time.Now().After(pending.ExpiresAt) {
+		return nil, fmt.Errorf("connection link is invalid or expired")
+	}
+	platform = adapter.ResolveName(platform)
+	if pending.Platform != platform {
+		return nil, fmt.Errorf("connection link does not match platform")
+	}
+	a := m.registry.Get(platform)
+	if a == nil || a.AuthScheme() != adapter.AuthCredentials {
+		return nil, fmt.Errorf("platform does not support credential connection")
+	}
+	return pending, nil
+}
+
+func (m *Manager) CompleteCredentials(ctx context.Context, platform, state string, raw map[string]any) (*models.ConnectedAccount, string, error) {
+	pending, err := m.GetPendingCredentials(ctx, platform, state)
+	if err != nil {
+		return nil, "", err
+	}
+	a := m.registry.Get(pending.Platform)
+	validator, ok := a.(adapter.CredentialsAuthProvider)
+	if !ok {
+		return nil, "", fmt.Errorf("platform does not support credential connection")
+	}
+	normalized, email, err := validator.ValidateCredentials(ctx, raw)
+	if err != nil {
+		return nil, "", err
+	}
+	credentialsJSON, err := json.Marshal(normalized)
+	if err != nil {
+		return nil, "", fmt.Errorf("encode credentials: %w", err)
+	}
+	account, err := m.SaveCredentials(ctx, pending.UserID, pending.Platform, string(credentialsJSON), email)
+	if err != nil {
+		return nil, "", err
+	}
+	_ = m.store.DeletePendingAuth(ctx, state)
+	return account, pending.CallbackURL, nil
 }
 
 // initiateComposioAuth delegates the OAuth flow to Composio via the v3 link API.
@@ -407,8 +473,8 @@ func fetchOutlookEmail(ctx context.Context, token string) string {
 	}
 	defer resp.Body.Close()
 	var info struct {
-		Mail                string `json:"mail"`
-		UserPrincipalName   string `json:"userPrincipalName"`
+		Mail              string `json:"mail"`
+		UserPrincipalName string `json:"userPrincipalName"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
 		return ""
@@ -478,7 +544,10 @@ func (m *Manager) GetActiveToken(ctx context.Context, userID, platform string) (
 	}
 	// Credentials adapters: token is the credentials JSON, no refresh needed.
 	if a != nil && a.AuthScheme() == adapter.AuthCredentials {
-		return account.AccessToken, nil
+		if m.credentialCipher == nil {
+			return "", fmt.Errorf("credential encryption is not configured")
+		}
+		return m.credentialCipher.Decrypt(account.AccessToken)
 	}
 
 	if !account.NeedsRefresh() {
@@ -524,6 +593,13 @@ func (m *Manager) SaveCredentials(ctx context.Context, userID, platform, credent
 	if a.AuthScheme() != adapter.AuthCredentials {
 		return nil, fmt.Errorf("platform %s does not use credentials auth", platform)
 	}
+	if m.credentialCipher == nil {
+		return nil, fmt.Errorf("credential encryption is not configured")
+	}
+	encryptedCredentials, err := m.credentialCipher.Encrypt(credentialsJSON)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt credentials: %w", err)
+	}
 
 	now := time.Now()
 	account := &models.ConnectedAccount{
@@ -531,7 +607,7 @@ func (m *Manager) SaveCredentials(ctx context.Context, userID, platform, credent
 		Platform:     platform,
 		Status:       models.StatusActive,
 		AccountEmail: accountEmail,
-		AccessToken:  credentialsJSON,
+		AccessToken:  encryptedCredentials,
 		TokenType:    "credentials",
 		CreatedAt:    now,
 		UpdatedAt:    now,
