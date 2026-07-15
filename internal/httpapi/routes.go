@@ -85,13 +85,13 @@ var credentialsPageTemplate = template.Must(template.New("credentials").Parse(`<
   <h1>Email connected</h1><p>Your SMTP mailbox is ready. You can close this page.</p>
 {{else}}
   <h1>Connect your email</h1>
-  <p>Enter your mailbox and app password. The outgoing mail settings are detected automatically.</p>
+  <p>Enter your mailbox and email authorization code or app-specific password. The outgoing mail settings are detected automatically.</p>
   {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
   <form method="post">
     <input type="hidden" name="state" value="{{.State}}">
     <label for="email">Email address</label><input id="email" name="email" type="email" autocomplete="username" required value="{{.Email}}">
-    <label for="password">App password or authorization code</label><input id="password" name="password" type="password" autocomplete="current-password" required>
-    <div class="hint">This is usually different from your normal sign-in password.</div>
+    <label for="password">Email authorization code or app-specific password</label><input id="password" name="password" type="password" autocomplete="current-password" required>
+    <div class="hint">Generate this credential in your email provider settings. Do not enter your normal sign-in password.</div>
     <button type="submit">Connect email</button>
   </form>
 {{end}}
