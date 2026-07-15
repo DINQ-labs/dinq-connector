@@ -38,9 +38,9 @@ func (r *Registry) Register(a PlatformAdapter) {
 // This handles cases where callers (especially LLM agents or frontends)
 // use different names for the same platform.
 var platformAliases = map[string]string{
-	"microsoft": "nylas",
-	"outlook":   "nylas",
-	"imap":      "nylas",
+	"microsoft": "outlook",
+	"imap":      "smtp_email",
+	"nylas":     "smtp_email",
 }
 
 // ResolveName returns the canonical adapter name for a given input,
