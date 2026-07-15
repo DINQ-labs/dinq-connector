@@ -224,7 +224,11 @@ func (h *Handler) handleCredentialsPage(w http.ResponseWriter, r *http.Request) 
 func renderCredentialsPage(w http.ResponseWriter, status int, data credentialsPageData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+	// The credentials page is served through the gateway under /connector.
+	// Omitting form-action avoids browsers treating the proxied public origin as
+	// different from the connector origin. The static form still submits to its
+	// current URL, while base-uri and the script ban prevent target rewriting.
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
